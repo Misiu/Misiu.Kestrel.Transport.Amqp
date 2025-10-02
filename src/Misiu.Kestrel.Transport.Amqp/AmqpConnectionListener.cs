@@ -242,6 +242,11 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
 
         Task PublishAsync(ReadOnlyMemory<byte> responseRaw)
         {
+            if (_ch == null)
+            {
+                return Task.CompletedTask;
+            }
+            
             var props = _ch.CreateBasicProperties();
             props.Persistent = _opts.Persistent;
             props.CorrelationId = correlationId;
