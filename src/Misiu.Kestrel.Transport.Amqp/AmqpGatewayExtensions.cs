@@ -66,7 +66,7 @@ public static class AmqpGatewayExtensions
     /// <returns>The endpoint route builder for chaining</returns>
     public static IEndpointRouteBuilder MapAmqpResultEndpoint(this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapGet("/amqp/result/{correlationId:guid}", (Guid correlationId, IMemoryCache cache, HttpContext context) =>
+        endpoints.MapGet("/amqp/result/{correlationId:guid}", async (Guid correlationId, IMemoryCache cache, HttpContext context) =>
         {
             var cacheKey = $"amqp:result:{correlationId:N}";
             if (cache.TryGetValue<HttpResponseEnvelope>(cacheKey, out var envelope) && envelope != null)
@@ -88,18 +88,19 @@ public static class AmqpGatewayExtensions
                 // Write body if present
                 if (envelope.Body != null && envelope.Body.Length > 0)
                 {
-                    return Results.Bytes(envelope.Body, envelope.ContentType);
+                    await context.Response.Body.WriteAsync(envelope.Body);
                 }
-                
-                return Results.Empty;
             }
-
-            return Results.NotFound(new
+            else
             {
-                correlationId,
-                status = "not_found",
-                message = "Result not found. It may still be processing or has expired."
-            });
+                context.Response.StatusCode = 404;
+                await context.Response.WriteAsJsonAsync(new
+                {
+                    correlationId,
+                    status = "not_found",
+                    message = "Result not found. It may still be processing or has expired."
+                });
+            }
         });
 
         return endpoints;
