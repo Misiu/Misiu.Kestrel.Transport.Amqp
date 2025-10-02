@@ -1,0 +1,1 @@
+# Misiu.Kestrel.Transport.Amqp
