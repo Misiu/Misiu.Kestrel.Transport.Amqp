@@ -69,10 +69,12 @@ public sealed class AmqpConnectionContext : ConnectionContext
         try
         {
             // Complete the output writer to signal we're done
+            // This must be done AFTER Kestrel finishes writing the response
+            // Since we're in disposal, Kestrel has finished processing
             Transport.Output.Complete();
             
             // Drain full raw HTTP response written by Kestrel into the output reader
-            // Use a shorter timeout (2s) to avoid blocking subsequent tests
+            // Use a shorter timeout (2s) to prevent hanging if pipe isn't completed
             using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             using var ms = new MemoryStream();
             
