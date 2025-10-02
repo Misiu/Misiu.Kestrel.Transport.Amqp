@@ -168,14 +168,22 @@ public class AmqpClientConsumer : BackgroundService
                         GatewayEnqueuedAtUtc = request.GatewayEnqueuedAtUtc
                     };
 
-                    // Copy response headers
+                    // Copy response headers (excluding hop-by-hop headers)
+                    var hopByHopHeaders = new[] { "Connection", "Keep-Alive", "Transfer-Encoding", "Upgrade", "Proxy-Connection" };
+                    
                     foreach (var header in response.Headers)
                     {
-                        responseEnvelope.Headers[header.Key] = header.Value.ToArray();
+                        // Skip hop-by-hop headers
+                        if (!hopByHopHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase))
+                        {
+                            responseEnvelope.Headers[header.Key] = header.Value.ToArray();
+                        }
                     }
                     foreach (var header in response.Content.Headers)
                     {
-                        if (!responseEnvelope.Headers.ContainsKey(header.Key))
+                        // Skip hop-by-hop headers and avoid duplicates
+                        if (!hopByHopHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase) &&
+                            !responseEnvelope.Headers.ContainsKey(header.Key))
                         {
                             responseEnvelope.Headers[header.Key] = header.Value.ToArray();
                         }
