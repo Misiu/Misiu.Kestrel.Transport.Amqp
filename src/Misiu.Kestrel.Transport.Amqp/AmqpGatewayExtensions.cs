@@ -51,7 +51,12 @@ public static class AmqpGatewayExtensions
     /// <returns>The application builder for chaining</returns>
     public static IApplicationBuilder UseAmqpGateway(this IApplicationBuilder app)
     {
-        return app.UseMiddleware<AmqpGatewayMiddleware>();
+        // Only forward requests that are not targeting the local result endpoint
+        app.UseWhen(
+            ctx => !ctx.Request.Path.StartsWithSegments("/amqp/result", out _),
+            branch => branch.UseMiddleware<AmqpGatewayMiddleware>());
+
+        return app;
     }
 
     /// <summary>
