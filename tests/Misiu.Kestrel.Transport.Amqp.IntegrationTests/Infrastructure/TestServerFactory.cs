@@ -25,7 +25,7 @@ public static class TestServerFactory
     {
         var builder = WebApplication.CreateBuilder();
         
-        builder.WebHost.UseUrls("http://localhost:0"); // Random port
+        builder.WebHost.UseUrls("http://127.0.0.1:0"); // Random port
         
         builder.Services.AddAmqpGateway(options =>
         {
@@ -97,7 +97,7 @@ public static class TestServerFactory
     {
         var builder = WebApplication.CreateBuilder();
         
-        builder.WebHost.UseUrls("http://localhost:0"); // Random port
+        builder.WebHost.UseUrls("http://127.0.0.1:0"); // Random port
         
         builder.Logging.ClearProviders();
         builder.Logging.AddConsole();
