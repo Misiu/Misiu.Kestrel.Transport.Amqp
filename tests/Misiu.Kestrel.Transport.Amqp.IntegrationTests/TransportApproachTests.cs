@@ -96,8 +96,30 @@ public class TransportApproachTests
             await clientApp.DisposeAsync();
         }
         
-        // Small delay to allow cleanup
-        await Task.Delay(200);
+        // Wait longer to ensure RabbitMQ consumer is fully cancelled and connections are closed
+        await Task.Delay(2000);
+        
+        // Purge queues AFTER stopping to ensure no stale messages
+        try
+        {
+            var factory = new RabbitMQ.Client.ConnectionFactory
+            {
+                HostName = _rabbitMq.HostName,
+                Port = _rabbitMq.Port,
+                UserName = _rabbitMq.UserName,
+                Password = _rabbitMq.Password
+            };
+            using var connection = factory.CreateConnection();
+            using var channel = connection.CreateModel();
+            
+            // Purge request and response queues
+            try { channel.QueuePurge("amqp.gateway.requests"); } catch { }
+            try { channel.QueuePurge("amqp.gateway.responses"); } catch { }
+        }
+        catch
+        {
+            // Ignore errors
+        }
     }
 
     [Fact]

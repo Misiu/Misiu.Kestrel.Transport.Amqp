@@ -24,6 +24,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
     private IConnection? _conn;
     private IModel? _ch;
     private AsyncEventingBasicConsumer? _consumer;
+    private string? _consumerTag;
 
     // Accept queue for Kestrel to pick up ConnectionContext instances
     private readonly Channel<AmqpConnectionContext> _acceptQueue = Channel.CreateUnbounded<AmqpConnectionContext>(
@@ -68,7 +69,10 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
 
         _consumer = new AsyncEventingBasicConsumer(_ch);
         _consumer.Received += OnReceivedAsync;
-        _ch.BasicConsume(_opts.RequestQueue, autoAck: false, consumer: _consumer);
+        
+        // Use unique consumer tag to avoid conflicts with previous consumers
+        _consumerTag = $"AmqpTransport-{_endpoint.Name}-{Guid.NewGuid()}";
+        _ch.BasicConsume(_opts.RequestQueue, autoAck: false, consumer: _consumer, consumerTag: _consumerTag);
 
         _logger.LogInformation("AMQP listener started on queue '{Queue}'", _opts.RequestQueue);
         return Task.CompletedTask;
@@ -77,11 +81,16 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
     /// <inheritdoc />
     public async ValueTask<ConnectionContext?> AcceptAsync(CancellationToken cancellationToken = default)
     {
+        _logger.LogDebug("AcceptAsync called, waiting for connection...");
+        
         if (await _acceptQueue.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false)
             && _acceptQueue.Reader.TryRead(out var ctx))
         {
+            _logger.LogDebug("AcceptAsync returning connection {ConnectionId}", ctx.ConnectionId);
             return ctx;
         }
+        
+        _logger.LogDebug("AcceptAsync returning null (no more connections)");
         return null;
     }
 
@@ -90,6 +99,21 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
     {
         // Complete the accept queue so any waiting AcceptAsync calls will complete
         _acceptQueue.Writer.TryComplete();
+        
+        // Cancel the consumer first to stop receiving new messages
+        try
+        {
+            if (_consumer != null && _ch != null && _consumerTag != null)
+            {
+                _consumer.Received -= OnReceivedAsync;
+                // Explicitly cancel the consumer before closing the channel
+                _ch.BasicCancel(_consumerTag);
+            }
+        }
+        catch
+        {
+            // Ignore errors
+        }
         
         try
         {
@@ -143,6 +167,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
         try
         {
             var correlationId = ea.BasicProperties?.CorrelationId ?? Guid.NewGuid().ToString();
+            _logger.LogDebug("OnReceivedAsync: Received AMQP message with correlationId {CorrelationId}", correlationId);
 
             // Build a raw HTTP/1.1 request bytes for Kestrel HTTP parser
             var (requestBytes, responsePublisher) = BuildRawHttpRequestAndResponder(ea, _opts.ResponseQueue, correlationId);
@@ -172,7 +197,9 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
 
             // ConnectionContext consumed by Kestrel
             var ctx = new AmqpConnectionContext(transport, outputPipe.Reader, _ch!, ea.DeliveryTag, responsePublisher, _logger, correlationId);
+            _logger.LogDebug("OnReceivedAsync: Writing connection {ConnectionId} to accept queue", correlationId);
             await _acceptQueue.Writer.WriteAsync(ctx).ConfigureAwait(false);
+            _logger.LogDebug("OnReceivedAsync: Connection {ConnectionId} written to accept queue", correlationId);
         }
         catch (Exception ex)
         {
