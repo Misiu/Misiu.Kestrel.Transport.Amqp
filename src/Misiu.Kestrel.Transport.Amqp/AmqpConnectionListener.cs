@@ -143,7 +143,6 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
         try
         {
             var correlationId = ea.BasicProperties?.CorrelationId ?? Guid.NewGuid().ToString();
-            _logger.LogInformation("Received AMQP message with correlation ID {CorrelationId}", correlationId);
 
             // Build a raw HTTP/1.1 request bytes for Kestrel HTTP parser
             var (requestBytes, responsePublisher) = BuildRawHttpRequestAndResponder(ea, _opts.ResponseQueue, correlationId);
@@ -254,13 +253,9 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
             
             try
             {
-                _logger.LogInformation("Publishing response for {CorrelationId}, {ByteCount} bytes", correlationId, responseRaw.Length);
-                
                 // Parse raw HTTP response to extract status code, headers, and body
                 var responseEnvelope = ParseRawHttpResponse(responseRaw);
                 responseEnvelope.CorrelationId = Guid.Parse(correlationId);
-                
-                _logger.LogInformation("Parsed response: StatusCode={StatusCode}", responseEnvelope.StatusCode);
                 
                 // Serialize to JSON with camelCase (to match gateway expectations)
                 var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -276,8 +271,6 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
                     mandatory: false,
                     basicProperties: props,
                     body: jsonBytes);
-                
-                _logger.LogInformation("Published response to {Queue} for {CorrelationId}", responseQueue, correlationId);
             }
             catch (Exception ex)
             {
@@ -290,14 +283,11 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
         HttpResponseEnvelope ParseRawHttpResponse(ReadOnlyMemory<byte> responseRaw)
         {
             var responseStr = Encoding.UTF8.GetString(responseRaw.Span);
-            _logger.LogInformation("Raw response ({Length} bytes): {Response}", responseRaw.Length, responseStr.Length > 500 ? responseStr.Substring(0, 500) + "..." : responseStr);
             var lines = responseStr.Split(new[] { "\r\n" }, StringSplitOptions.None);
             
             // Parse status line (e.g., "HTTP/1.1 200 OK")
             var statusLine = lines[0];
-            _logger.LogInformation("Status line: '{StatusLine}'", statusLine);
             var statusParts = statusLine.Split(' ', 3);
-            _logger.LogInformation("Status parts: Count={Count}, Part0='{Part0}', Part1='{Part1}'", statusParts.Length, statusParts.Length > 0 ? statusParts[0] : "", statusParts.Length > 1 ? statusParts[1] : "");
             var statusCode = int.Parse(statusParts[1]);
             
             // Parse headers
