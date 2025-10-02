@@ -34,7 +34,7 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
     {
         // Create and start the local API
         _localApi = TestServerFactory.CreateLocalApi();
-        await _localApi.StartAsync();
+        await _localApi.StartAsync().WaitAsync(TimeSpan.FromSeconds(10));
         
         var addresses = _localApi.Urls.ToList();
         _localApiBaseUrl = addresses.First();
@@ -47,7 +47,7 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
             _rabbitMq.Password,
             _localApiBaseUrl);
 
-        await _clientHost.StartAsync();
+        await _clientHost.StartAsync().WaitAsync(TimeSpan.FromSeconds(10));
         await Task.Delay(1000); // Wait for client to connect to RabbitMQ
 
         // Create and start the gateway server
@@ -58,7 +58,7 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
             _rabbitMq.Password,
             immediateTimeoutSeconds: 3);
 
-        await _gatewayServer.StartAsync();
+        await _gatewayServer.StartAsync().WaitAsync(TimeSpan.FromSeconds(10));
         
         var gatewayAddresses = _gatewayServer.Urls.ToList();
         _gatewayBaseUrl = gatewayAddresses.First();
@@ -74,19 +74,40 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
         
         if (_gatewayServer != null)
         {
-            await _gatewayServer.StopAsync();
+            try
+            {
+                await _gatewayServer.StopAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            catch (TimeoutException)
+            {
+                // Continue with disposal even if stop times out
+            }
             await _gatewayServer.DisposeAsync();
         }
 
         if (_clientHost != null)
         {
-            await _clientHost.StopAsync();
+            try
+            {
+                await _clientHost.StopAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            catch (TimeoutException)
+            {
+                // Continue with disposal even if stop times out
+            }
             _clientHost.Dispose();
         }
 
         if (_localApi != null)
         {
-            await _localApi.StopAsync();
+            try
+            {
+                await _localApi.StopAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            catch (TimeoutException)
+            {
+                // Continue with disposal even if stop times out
+            }
             await _localApi.DisposeAsync();
         }
     }
