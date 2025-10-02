@@ -24,6 +24,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
     private IConnection? _conn;
     private IModel? _ch;
     private AsyncEventingBasicConsumer? _consumer;
+    private string? _consumerTag;
 
     // Accept queue for Kestrel to pick up ConnectionContext instances
     private readonly Channel<AmqpConnectionContext> _acceptQueue = Channel.CreateUnbounded<AmqpConnectionContext>(
@@ -59,8 +60,12 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
             TopologyRecoveryEnabled = true
         };
 
-        _conn = factory.CreateConnection($"AmqpTransport-{_endpoint.Name}");
+        // Use unique connection name to ensure complete isolation between instances
+        var connectionName = $"AmqpTransport-{_endpoint.Name}-{Guid.NewGuid().ToString().Substring(0, 8)}";
+        _conn = factory.CreateConnection(connectionName);
         _ch = _conn.CreateModel();
+        
+        _logger.LogInformation("Creating AMQP connection '{ConnectionName}'", connectionName);
 
         _ch.QueueDeclare(_opts.RequestQueue, durable: _opts.Persistent, exclusive: false, autoDelete: false, arguments: null);
         _ch.QueueDeclare(_opts.ResponseQueue, durable: _opts.Persistent, exclusive: false, autoDelete: false, arguments: null);
@@ -68,7 +73,10 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
 
         _consumer = new AsyncEventingBasicConsumer(_ch);
         _consumer.Received += OnReceivedAsync;
-        _ch.BasicConsume(_opts.RequestQueue, autoAck: false, consumer: _consumer);
+        
+        // Use unique consumer tag to avoid conflicts with previous consumers
+        _consumerTag = $"AmqpTransport-{_endpoint.Name}-{Guid.NewGuid()}";
+        _ch.BasicConsume(_opts.RequestQueue, autoAck: false, consumer: _consumer, consumerTag: _consumerTag);
 
         _logger.LogInformation("AMQP listener started on queue '{Queue}'", _opts.RequestQueue);
         return Task.CompletedTask;
@@ -77,17 +85,40 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
     /// <inheritdoc />
     public async ValueTask<ConnectionContext?> AcceptAsync(CancellationToken cancellationToken = default)
     {
+        _logger.LogDebug("AcceptAsync called, waiting for connection...");
+        
         if (await _acceptQueue.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false)
             && _acceptQueue.Reader.TryRead(out var ctx))
         {
+            _logger.LogDebug("AcceptAsync returning connection {ConnectionId}", ctx.ConnectionId);
             return ctx;
         }
+        
+        _logger.LogDebug("AcceptAsync returning null (no more connections)");
         return null;
     }
 
     /// <inheritdoc />
     public ValueTask UnbindAsync(CancellationToken cancellationToken = default)
     {
+        // Complete the accept queue so any waiting AcceptAsync calls will complete
+        _acceptQueue.Writer.TryComplete();
+        
+        // Cancel the consumer first to stop receiving new messages
+        try
+        {
+            if (_consumer != null && _ch != null && _consumerTag != null)
+            {
+                _consumer.Received -= OnReceivedAsync;
+                // Explicitly cancel the consumer before closing the channel
+                _ch.BasicCancel(_consumerTag);
+            }
+        }
+        catch
+        {
+            // Ignore errors
+        }
+        
         try
         {
             _ch?.Close();
@@ -140,6 +171,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
         try
         {
             var correlationId = ea.BasicProperties?.CorrelationId ?? Guid.NewGuid().ToString();
+            _logger.LogDebug("OnReceivedAsync: Received AMQP message with correlationId {CorrelationId}", correlationId);
 
             // Build a raw HTTP/1.1 request bytes for Kestrel HTTP parser
             var (requestBytes, responsePublisher) = BuildRawHttpRequestAndResponder(ea, _opts.ResponseQueue, correlationId);
@@ -169,7 +201,9 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
 
             // ConnectionContext consumed by Kestrel
             var ctx = new AmqpConnectionContext(transport, outputPipe.Reader, _ch!, ea.DeliveryTag, responsePublisher, _logger, correlationId);
+            _logger.LogDebug("OnReceivedAsync: Writing connection {ConnectionId} to accept queue", correlationId);
             await _acceptQueue.Writer.WriteAsync(ctx).ConfigureAwait(false);
+            _logger.LogDebug("OnReceivedAsync: Connection {ConnectionId} written to accept queue", correlationId);
         }
         catch (Exception ex)
         {
@@ -244,21 +278,100 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
         {
             if (_ch == null)
             {
+                _logger.LogWarning("Channel is null, cannot publish response for {CorrelationId}", correlationId);
                 return Task.CompletedTask;
             }
             
-            var props = _ch.CreateBasicProperties();
-            props.Persistent = _opts.Persistent;
-            props.CorrelationId = correlationId;
+            try
+            {
+                // Parse raw HTTP response to extract status code, headers, and body
+                var responseEnvelope = ParseRawHttpResponse(responseRaw);
+                responseEnvelope.CorrelationId = Guid.Parse(correlationId);
+                
+                // Serialize to JSON with camelCase (to match gateway expectations)
+                var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+                var jsonBytes = JsonSerializer.SerializeToUtf8Bytes(responseEnvelope, jsonOptions);
+                
+                var props = _ch.CreateBasicProperties();
+                props.Persistent = _opts.Persistent;
+                props.CorrelationId = correlationId;
 
-            _ch.BasicPublish(
-                exchange: "",
-                routingKey: responseQueue,
-                mandatory: false,
-                basicProperties: props,
-                body: responseRaw);
+                _ch.BasicPublish(
+                    exchange: "",
+                    routingKey: responseQueue,
+                    mandatory: false,
+                    basicProperties: props,
+                    body: jsonBytes);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error publishing response for {CorrelationId}", correlationId);
+            }
             
             return Task.CompletedTask;
+        }
+        
+        HttpResponseEnvelope ParseRawHttpResponse(ReadOnlyMemory<byte> responseRaw)
+        {
+            var responseStr = Encoding.UTF8.GetString(responseRaw.Span);
+            var lines = responseStr.Split(new[] { "\r\n" }, StringSplitOptions.None);
+            
+            // Parse status line (e.g., "HTTP/1.1 200 OK")
+            var statusLine = lines[0];
+            var statusParts = statusLine.Split(' ', 3);
+            var statusCode = int.Parse(statusParts[1]);
+            
+            // Parse headers
+            var headers = new Dictionary<string, string[]>();
+            int bodyStartIndex = 0;
+            for (int i = 1; i < lines.Length; i++)
+            {
+                if (string.IsNullOrEmpty(lines[i]))
+                {
+                    bodyStartIndex = i + 1;
+                    break;
+                }
+                
+                var colonIndex = lines[i].IndexOf(':');
+                if (colonIndex > 0)
+                {
+                    var headerName = lines[i].Substring(0, colonIndex).Trim();
+                    var headerValue = lines[i].Substring(colonIndex + 1).Trim();
+                    
+                    if (headers.ContainsKey(headerName))
+                    {
+                        var existing = headers[headerName];
+                        var newArray = new string[existing.Length + 1];
+                        existing.CopyTo(newArray, 0);
+                        newArray[existing.Length] = headerValue;
+                        headers[headerName] = newArray;
+                    }
+                    else
+                    {
+                        headers[headerName] = new[] { headerValue };
+                    }
+                }
+            }
+            
+            // Extract body (everything after the empty line)
+            byte[]? body = null;
+            if (bodyStartIndex < lines.Length)
+            {
+                var bodyText = string.Join("\r\n", lines, bodyStartIndex, lines.Length - bodyStartIndex);
+                if (!string.IsNullOrEmpty(bodyText))
+                {
+                    body = Encoding.UTF8.GetBytes(bodyText);
+                }
+            }
+            
+            return new HttpResponseEnvelope
+            {
+                CorrelationId = Guid.Empty, // Will be set by caller
+                StatusCode = statusCode,
+                Headers = headers,
+                Body = body,
+                ProcessingMilliseconds = 0 // Not tracked in Transport approach
+            };
         }
 
         return (buf, PublishAsync);

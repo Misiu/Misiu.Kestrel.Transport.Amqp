@@ -1,5 +1,6 @@
 using System.IO.Pipelines;
 using System.Net;
+using System.Text;
 using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Logging;
@@ -68,24 +69,61 @@ public sealed class AmqpConnectionContext : ConnectionContext
     {
         try
         {
+            // Complete the output writer to signal we're done
+            // This must be done AFTER Kestrel finishes writing the response
+            // Since we're in disposal, Kestrel has finished processing
+            Transport.Output.Complete();
+            
             // Drain full raw HTTP response written by Kestrel into the output reader
+            // Use a 5-second timeout to prevent hanging if pipe isn't completed properly
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var ms = new MemoryStream();
-            while (true)
+            
+            var drainTask = Task.Run(async () =>
             {
-                var result = await _outputReader.ReadAsync().ConfigureAwait(false);
-                var buffer = result.Buffer;
-                foreach (var segment in buffer)
+                while (true)
                 {
-                    await ms.WriteAsync(segment, default).ConfigureAwait(false);
+                    var result = await _outputReader.ReadAsync().ConfigureAwait(false);
+                    var buffer = result.Buffer;
+                    foreach (var segment in buffer)
+                    {
+                        await ms.WriteAsync(segment).ConfigureAwait(false);
+                    }
+                    _outputReader.AdvanceTo(buffer.End);
+                    if (result.IsCompleted)
+                    {
+                        break;
+                    }
                 }
-                _outputReader.AdvanceTo(buffer.End);
-                if (result.IsCompleted)
-                {
-                    break;
-                }
-            }
+            });
+            
+            await drainTask.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
 
             await _publishResponse(ms.ToArray()).ConfigureAwait(false);
+            try
+            {
+                _channel.BasicAck(_deliveryTag, multiple: false);
+            }
+            catch
+            {
+                // Ignore ack errors
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("Timeout while draining output pipe for {ConnectionId}, publishing error response", _id);
+            
+            // Publish a 500 error response so gateway doesn't timeout
+            try
+            {
+                var errorResponse = Encoding.UTF8.GetBytes("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
+                await _publishResponse(errorResponse).ConfigureAwait(false);
+            }
+            catch (Exception publishEx)
+            {
+                _logger.LogError(publishEx, "Failed to publish error response for {ConnectionId}", _id);
+            }
+            
             try
             {
                 _channel.BasicAck(_deliveryTag, multiple: false);

@@ -32,9 +32,31 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
+        // Purge RabbitMQ queues to ensure clean state
+        try
+        {
+            var factory = new RabbitMQ.Client.ConnectionFactory
+            {
+                HostName = _rabbitMq.HostName,
+                Port = _rabbitMq.Port,
+                UserName = _rabbitMq.UserName,
+                Password = _rabbitMq.Password
+            };
+            using var connection = factory.CreateConnection();
+            using var channel = connection.CreateModel();
+            
+            // Purge request and response queues
+            try { channel.QueuePurge("amqp.gateway.requests"); } catch { }
+            try { channel.QueuePurge("amqp.gateway.responses"); } catch { }
+        }
+        catch
+        {
+            // Ignore errors - queues might not exist yet
+        }
+        
         // Create and start the local API
         _localApi = TestServerFactory.CreateLocalApi();
-        await _localApi.StartAsync();
+        await _localApi.StartAsync().WaitAsync(TimeSpan.FromSeconds(10));
         
         var addresses = _localApi.Urls.ToList();
         _localApiBaseUrl = addresses.First();
@@ -47,8 +69,10 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
             _rabbitMq.Password,
             _localApiBaseUrl);
 
-        await _clientHost.StartAsync();
-        await Task.Delay(1000); // Wait for client to connect to RabbitMQ
+        await _clientHost.StartAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        
+        // Small delay to let client initialize
+        await Task.Delay(500);
 
         // Create and start the gateway server
         _gatewayServer = TestServerFactory.CreateGatewayServer(
@@ -58,14 +82,15 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
             _rabbitMq.Password,
             immediateTimeoutSeconds: 3);
 
-        await _gatewayServer.StartAsync();
+        await _gatewayServer.StartAsync().WaitAsync(TimeSpan.FromSeconds(10));
         
         var gatewayAddresses = _gatewayServer.Urls.ToList();
         _gatewayBaseUrl = gatewayAddresses.First();
 
         _httpClient = new HttpClient { BaseAddress = new Uri(_gatewayBaseUrl) };
         
-        await Task.Delay(500); // Wait for gateway to connect to RabbitMQ
+        // Small delay to let gateway initialize
+        await Task.Delay(500);
     }
 
     public async Task DisposeAsync()
@@ -74,19 +99,40 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
         
         if (_gatewayServer != null)
         {
-            await _gatewayServer.StopAsync();
+            try
+            {
+                await _gatewayServer.StopAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            catch (TimeoutException)
+            {
+                // Continue with disposal even if stop times out
+            }
             await _gatewayServer.DisposeAsync();
         }
 
         if (_clientHost != null)
         {
-            await _clientHost.StopAsync();
+            try
+            {
+                await _clientHost.StopAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            catch (TimeoutException)
+            {
+                // Continue with disposal even if stop times out
+            }
             _clientHost.Dispose();
         }
 
         if (_localApi != null)
         {
-            await _localApi.StopAsync();
+            try
+            {
+                await _localApi.StopAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            catch (TimeoutException)
+            {
+                // Continue with disposal even if stop times out
+            }
             await _localApi.DisposeAsync();
         }
     }
@@ -260,6 +306,50 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
         {
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         }
+    }
+
+    [Fact]
+    public async Task Test_Out_Of_Order_Responses_Are_Correctly_Matched()
+    {
+        // Arrange - Send two requests: one slower (1 second), one fast (immediate)
+        // The fast one should complete first but should be matched to the correct request
+        
+        // Act - Send slower request first (takes 1 second)
+        var slowerTask = Task.Run(async () =>
+        {
+            var response = await _httpClient!.GetAsync("/api/medium");
+            var content = await response.Content.ReadFromJsonAsync<JsonElement>();
+            return new { Response = response, Content = content, RequestType = "slower" };
+        });
+
+        // Give the slower request a head start
+        await Task.Delay(100);
+
+        // Send fast request (returns immediately)
+        var fastTask = Task.Run(async () =>
+        {
+            var response = await _httpClient!.GetAsync("/api/data");
+            var content = await response.Content.ReadFromJsonAsync<JsonElement>();
+            return new { Response = response, Content = content, RequestType = "fast" };
+        });
+
+        // Wait for both to complete
+        var results = await Task.WhenAll(slowerTask, fastTask);
+        var slowerResult = results[0];
+        var fastResult = results[1];
+
+        // Assert - Both should succeed with OK status
+        Assert.Equal(HttpStatusCode.OK, slowerResult.Response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, fastResult.Response.StatusCode);
+
+        // Assert - Responses should contain correct content for each request
+        // Slower request should get slower response
+        Assert.Equal("slower", slowerResult.RequestType);
+        Assert.Equal("Medium operation completed", slowerResult.Content.GetProperty("message").GetString());
+
+        // Fast request should get fast response  
+        Assert.Equal("fast", fastResult.RequestType);
+        Assert.Equal("Data from API", fastResult.Content.GetProperty("message").GetString());
     }
 
     [Fact]

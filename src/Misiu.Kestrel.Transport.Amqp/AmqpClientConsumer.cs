@@ -237,7 +237,14 @@ public class AmqpClientConsumer : BackgroundService
         _logger.LogInformation("AMQP Client Consumer started, listening on {Queue}", _options.RequestQueue);
 
         // Keep running until cancellation
-        await Task.Delay(Timeout.Infinite, stoppingToken);
+        try
+        {
+            await Task.Delay(Timeout.Infinite, stoppingToken);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("AMQP Client Consumer stopping");
+        }
     }
 
     private async Task<HttpResponseMessage> ExecuteRequestAsync(HttpRequestEnvelope request, CancellationToken cancellationToken)
@@ -280,11 +287,41 @@ public class AmqpClientConsumer : BackgroundService
     /// </summary>
     public override void Dispose()
     {
-        base.Dispose();
-        try { _channel?.Close(); } catch { }
-        try { _channel?.Dispose(); } catch { }
-        try { _connection?.Close(); } catch { }
-        try { _connection?.Dispose(); } catch { }
-        _httpClient?.Dispose();
+        try
+        {
+            // Close channel first to stop consuming
+            if (_channel != null)
+            {
+                try 
+                { 
+                    _channel.Close(); 
+                } 
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error closing AMQP channel during disposal");
+                }
+                try { _channel.Dispose(); } catch { }
+            }
+            
+            // Then close connection
+            if (_connection != null)
+            {
+                try 
+                { 
+                    _connection.Close(); 
+                } 
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error closing AMQP connection during disposal");
+                }
+                try { _connection.Dispose(); } catch { }
+            }
+            
+            _httpClient?.Dispose();
+        }
+        finally
+        {
+            base.Dispose();
+        }
     }
 }
