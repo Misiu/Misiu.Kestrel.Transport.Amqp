@@ -8,4 +8,8 @@
         <ProjectReference Include="..\..\src\Misiu.Kestrel.Transport.Amqp\Misiu.Kestrel.Transport.Amqp.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+      <PackageReference Include="RabbitMQ.Client" Version="6.8.1" />
+    </ItemGroup>
+
 </Project>
