@@ -16,6 +16,7 @@ namespace Misiu.Kestrel.Transport.Amqp;
 /// </summary>
 public class AmqpClientConsumer : BackgroundService
 {
+    private static readonly JsonSerializerOptions _jsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private readonly ILogger<AmqpClientConsumer> _logger;
     private readonly AmqpTransportOptions _options;
     private readonly HttpClient _httpClient;
@@ -133,7 +134,7 @@ public class AmqpClientConsumer : BackgroundService
                     return;
                 }
 
-                var request = JsonSerializer.Deserialize<HttpRequestEnvelope>(ea.Body.ToArray());
+                var request = JsonSerializer.Deserialize<HttpRequestEnvelope>(ea.Body.ToArray(), _jsonOptions);
                 if (request == null)
                 {
                     _logger.LogWarning("Failed to deserialize request for {CorrelationId}", correlationId);
@@ -181,7 +182,7 @@ public class AmqpClientConsumer : BackgroundService
                     }
 
                     // Publish response
-                    var responsePayload = JsonSerializer.SerializeToUtf8Bytes(responseEnvelope);
+                    var responsePayload = JsonSerializer.SerializeToUtf8Bytes(responseEnvelope, _jsonOptions);
                     var props = _channel!.CreateBasicProperties();
                     props.CorrelationId = correlationId.ToString();
                     props.Persistent = _options.Persistent;
@@ -203,7 +204,7 @@ public class AmqpClientConsumer : BackgroundService
                         { 
                             ["Content-Type"] = new[] { "application/json" } 
                         },
-                        Body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { error = ex.Message })),
+                        Body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { error = ex.Message }, _jsonOptions)),
                         ContentType = "application/json",
                         ServerStartedAtUtc = serverStarted,
                         ServerCompletedAtUtc = DateTimeOffset.UtcNow,
@@ -211,7 +212,7 @@ public class AmqpClientConsumer : BackgroundService
                         GatewayEnqueuedAtUtc = request.GatewayEnqueuedAtUtc
                     };
 
-                    var errorPayload = JsonSerializer.SerializeToUtf8Bytes(errorEnvelope);
+                    var errorPayload = JsonSerializer.SerializeToUtf8Bytes(errorEnvelope, _jsonOptions);
                     var props = _channel!.CreateBasicProperties();
                     props.CorrelationId = correlationId.ToString();
                     props.Persistent = _options.Persistent;

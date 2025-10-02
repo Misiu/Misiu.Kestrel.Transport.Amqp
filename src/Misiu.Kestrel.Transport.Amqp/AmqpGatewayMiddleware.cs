@@ -22,6 +22,7 @@ public class AmqpGatewayMiddleware
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<HttpResponseEnvelope>> _pendingRequests;
     private readonly IConnection _connection;
     private readonly IModel _channel;
+    private static readonly JsonSerializerOptions _jsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AmqpGatewayMiddleware"/> class
@@ -77,7 +78,7 @@ public class AmqpGatewayMiddleware
                     return;
                 }
 
-                var envelope = JsonSerializer.Deserialize<HttpResponseEnvelope>(ea.Body.ToArray());
+                var envelope = JsonSerializer.Deserialize<HttpResponseEnvelope>(ea.Body.ToArray(), _jsonOptions);
                 if (envelope == null)
                 {
                     _logger.LogWarning("Failed to deserialize response for {CorrelationId}", correlationId);
@@ -149,7 +150,7 @@ public class AmqpGatewayMiddleware
         };
 
         // Serialize and publish
-        var payload = JsonSerializer.SerializeToUtf8Bytes(envelope);
+        var payload = JsonSerializer.SerializeToUtf8Bytes(envelope, _jsonOptions);
         var props = _channel.CreateBasicProperties();
         props.CorrelationId = correlationId.ToString();
         props.Persistent = _options.Persistent;
