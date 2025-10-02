@@ -88,6 +88,9 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
     /// <inheritdoc />
     public ValueTask UnbindAsync(CancellationToken cancellationToken = default)
     {
+        // Complete the accept queue so any waiting AcceptAsync calls will complete
+        _acceptQueue.Writer.TryComplete();
+        
         try
         {
             _ch?.Close();

@@ -69,14 +69,17 @@ public sealed class AmqpConnectionContext : ConnectionContext
         try
         {
             // Drain full raw HTTP response written by Kestrel into the output reader
+            // Use a timeout to prevent hanging if the pipe is never completed
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             using var ms = new MemoryStream();
+            
             while (true)
             {
-                var result = await _outputReader.ReadAsync().ConfigureAwait(false);
+                var result = await _outputReader.ReadAsync(cts.Token).ConfigureAwait(false);
                 var buffer = result.Buffer;
                 foreach (var segment in buffer)
                 {
-                    await ms.WriteAsync(segment, default).ConfigureAwait(false);
+                    await ms.WriteAsync(segment, cts.Token).ConfigureAwait(false);
                 }
                 _outputReader.AdvanceTo(buffer.End);
                 if (result.IsCompleted)
@@ -86,6 +89,18 @@ public sealed class AmqpConnectionContext : ConnectionContext
             }
 
             await _publishResponse(ms.ToArray()).ConfigureAwait(false);
+            try
+            {
+                _channel.BasicAck(_deliveryTag, multiple: false);
+            }
+            catch
+            {
+                // Ignore ack errors
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("Timeout while draining output pipe for {ConnectionId}, continuing with disposal", _id);
             try
             {
                 _channel.BasicAck(_deliveryTag, multiple: false);
