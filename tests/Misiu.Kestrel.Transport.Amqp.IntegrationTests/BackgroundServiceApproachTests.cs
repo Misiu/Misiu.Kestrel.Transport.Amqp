@@ -263,6 +263,50 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Test_Out_Of_Order_Responses_Are_Correctly_Matched()
+    {
+        // Arrange - Send two requests: one slower (1 second), one fast (immediate)
+        // The fast one should complete first but should be matched to the correct request
+        
+        // Act - Send slower request first (takes 1 second)
+        var slowerTask = Task.Run(async () =>
+        {
+            var response = await _httpClient!.GetAsync("/api/medium");
+            var content = await response.Content.ReadFromJsonAsync<JsonElement>();
+            return new { Response = response, Content = content, RequestType = "slower" };
+        });
+
+        // Give the slower request a head start
+        await Task.Delay(100);
+
+        // Send fast request (returns immediately)
+        var fastTask = Task.Run(async () =>
+        {
+            var response = await _httpClient!.GetAsync("/api/data");
+            var content = await response.Content.ReadFromJsonAsync<JsonElement>();
+            return new { Response = response, Content = content, RequestType = "fast" };
+        });
+
+        // Wait for both to complete
+        var results = await Task.WhenAll(slowerTask, fastTask);
+        var slowerResult = results[0];
+        var fastResult = results[1];
+
+        // Assert - Both should succeed with OK status
+        Assert.Equal(HttpStatusCode.OK, slowerResult.Response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, fastResult.Response.StatusCode);
+
+        // Assert - Responses should contain correct content for each request
+        // Slower request should get slower response
+        Assert.Equal("slower", slowerResult.RequestType);
+        Assert.Equal("Medium operation completed", slowerResult.Content.GetProperty("message").GetString());
+
+        // Fast request should get fast response  
+        Assert.Equal("fast", fastResult.RequestType);
+        Assert.Equal("Data from API", fastResult.Content.GetProperty("message").GetString());
+    }
+
+    [Fact]
     public async Task Test_Headers_Distinguish_Client_Errors_From_Server_Errors()
     {
         // This test verifies we can distinguish between errors from our server

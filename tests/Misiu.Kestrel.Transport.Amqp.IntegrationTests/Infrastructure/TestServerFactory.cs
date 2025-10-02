@@ -171,6 +171,12 @@ public static class TestServerFactory
             return Results.Ok(new { message = "Slow operation completed", timestamp = DateTimeOffset.UtcNow });
         });
 
+        app.MapGet("/api/medium", async () =>
+        {
+            await Task.Delay(1000);
+            return Results.Ok(new { message = "Medium operation completed", timestamp = DateTimeOffset.UtcNow });
+        });
+
         app.MapGet("/api/error", () =>
         {
             throw new InvalidOperationException("Simulated error");
