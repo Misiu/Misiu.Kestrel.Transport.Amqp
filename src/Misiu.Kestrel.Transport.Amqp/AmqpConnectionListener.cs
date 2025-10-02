@@ -143,6 +143,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
         try
         {
             var correlationId = ea.BasicProperties?.CorrelationId ?? Guid.NewGuid().ToString();
+            _logger.LogInformation("Received AMQP message with correlation ID {CorrelationId}", correlationId);
 
             // Build a raw HTTP/1.1 request bytes for Kestrel HTTP parser
             var (requestBytes, responsePublisher) = BuildRawHttpRequestAndResponder(ea, _opts.ResponseQueue, correlationId);
@@ -247,21 +248,109 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
         {
             if (_ch == null)
             {
+                _logger.LogWarning("Channel is null, cannot publish response for {CorrelationId}", correlationId);
                 return Task.CompletedTask;
             }
             
-            var props = _ch.CreateBasicProperties();
-            props.Persistent = _opts.Persistent;
-            props.CorrelationId = correlationId;
+            try
+            {
+                _logger.LogInformation("Publishing response for {CorrelationId}, {ByteCount} bytes", correlationId, responseRaw.Length);
+                
+                // Parse raw HTTP response to extract status code, headers, and body
+                var responseEnvelope = ParseRawHttpResponse(responseRaw);
+                responseEnvelope.CorrelationId = Guid.Parse(correlationId);
+                
+                _logger.LogInformation("Parsed response: StatusCode={StatusCode}", responseEnvelope.StatusCode);
+                
+                // Serialize to JSON with camelCase (to match gateway expectations)
+                var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+                var jsonBytes = JsonSerializer.SerializeToUtf8Bytes(responseEnvelope, jsonOptions);
+                
+                var props = _ch.CreateBasicProperties();
+                props.Persistent = _opts.Persistent;
+                props.CorrelationId = correlationId;
 
-            _ch.BasicPublish(
-                exchange: "",
-                routingKey: responseQueue,
-                mandatory: false,
-                basicProperties: props,
-                body: responseRaw);
+                _ch.BasicPublish(
+                    exchange: "",
+                    routingKey: responseQueue,
+                    mandatory: false,
+                    basicProperties: props,
+                    body: jsonBytes);
+                
+                _logger.LogInformation("Published response to {Queue} for {CorrelationId}", responseQueue, correlationId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error publishing response for {CorrelationId}", correlationId);
+            }
             
             return Task.CompletedTask;
+        }
+        
+        HttpResponseEnvelope ParseRawHttpResponse(ReadOnlyMemory<byte> responseRaw)
+        {
+            var responseStr = Encoding.UTF8.GetString(responseRaw.Span);
+            _logger.LogInformation("Raw response ({Length} bytes): {Response}", responseRaw.Length, responseStr.Length > 500 ? responseStr.Substring(0, 500) + "..." : responseStr);
+            var lines = responseStr.Split(new[] { "\r\n" }, StringSplitOptions.None);
+            
+            // Parse status line (e.g., "HTTP/1.1 200 OK")
+            var statusLine = lines[0];
+            _logger.LogInformation("Status line: '{StatusLine}'", statusLine);
+            var statusParts = statusLine.Split(' ', 3);
+            _logger.LogInformation("Status parts: Count={Count}, Part0='{Part0}', Part1='{Part1}'", statusParts.Length, statusParts.Length > 0 ? statusParts[0] : "", statusParts.Length > 1 ? statusParts[1] : "");
+            var statusCode = int.Parse(statusParts[1]);
+            
+            // Parse headers
+            var headers = new Dictionary<string, string[]>();
+            int bodyStartIndex = 0;
+            for (int i = 1; i < lines.Length; i++)
+            {
+                if (string.IsNullOrEmpty(lines[i]))
+                {
+                    bodyStartIndex = i + 1;
+                    break;
+                }
+                
+                var colonIndex = lines[i].IndexOf(':');
+                if (colonIndex > 0)
+                {
+                    var headerName = lines[i].Substring(0, colonIndex).Trim();
+                    var headerValue = lines[i].Substring(colonIndex + 1).Trim();
+                    
+                    if (headers.ContainsKey(headerName))
+                    {
+                        var existing = headers[headerName];
+                        var newArray = new string[existing.Length + 1];
+                        existing.CopyTo(newArray, 0);
+                        newArray[existing.Length] = headerValue;
+                        headers[headerName] = newArray;
+                    }
+                    else
+                    {
+                        headers[headerName] = new[] { headerValue };
+                    }
+                }
+            }
+            
+            // Extract body (everything after the empty line)
+            byte[]? body = null;
+            if (bodyStartIndex < lines.Length)
+            {
+                var bodyText = string.Join("\r\n", lines, bodyStartIndex, lines.Length - bodyStartIndex);
+                if (!string.IsNullOrEmpty(bodyText))
+                {
+                    body = Encoding.UTF8.GetBytes(bodyText);
+                }
+            }
+            
+            return new HttpResponseEnvelope
+            {
+                CorrelationId = Guid.Empty, // Will be set by caller
+                StatusCode = statusCode,
+                Headers = headers,
+                Body = body,
+                ProcessingMilliseconds = 0 // Not tracked in Transport approach
+            };
         }
 
         return (buf, PublishAsync);

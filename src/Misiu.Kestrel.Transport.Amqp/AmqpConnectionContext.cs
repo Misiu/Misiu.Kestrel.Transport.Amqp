@@ -68,25 +68,33 @@ public sealed class AmqpConnectionContext : ConnectionContext
     {
         try
         {
+            // Complete the output writer to signal we're done
+            Transport.Output.Complete();
+            
             // Drain full raw HTTP response written by Kestrel into the output reader
             // Use a timeout to prevent hanging if the pipe is never completed
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             using var ms = new MemoryStream();
             
-            while (true)
+            var drainTask = Task.Run(async () =>
             {
-                var result = await _outputReader.ReadAsync(cts.Token).ConfigureAwait(false);
-                var buffer = result.Buffer;
-                foreach (var segment in buffer)
+                while (true)
                 {
-                    await ms.WriteAsync(segment, cts.Token).ConfigureAwait(false);
+                    var result = await _outputReader.ReadAsync().ConfigureAwait(false);
+                    var buffer = result.Buffer;
+                    foreach (var segment in buffer)
+                    {
+                        await ms.WriteAsync(segment).ConfigureAwait(false);
+                    }
+                    _outputReader.AdvanceTo(buffer.End);
+                    if (result.IsCompleted)
+                    {
+                        break;
+                    }
                 }
-                _outputReader.AdvanceTo(buffer.End);
-                if (result.IsCompleted)
-                {
-                    break;
-                }
-            }
+            });
+            
+            await drainTask.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
 
             await _publishResponse(ms.ToArray()).ConfigureAwait(false);
             try
