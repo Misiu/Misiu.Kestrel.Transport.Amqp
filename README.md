@@ -3,9 +3,9 @@
 [![CI](https://github.com/Misiu/Misiu.Kestrel.Transport.Amqp/actions/workflows/ci.yml/badge.svg)](https://github.com/Misiu/Misiu.Kestrel.Transport.Amqp/actions/workflows/ci.yml)
 [![NuGet](https://img.shields.io/nuget/v/Misiu.Kestrel.Transport.Amqp.svg)](https://www.nuget.org/packages/Misiu.Kestrel.Transport.Amqp/)
 
-AMQP Transport for Kestrel server targeting .NET 9.
+AMQP Gateway for ASP.NET Core targeting .NET 9.
 
-This library provides a custom transport for ASP.NET Core Kestrel that allows HTTP requests to be received via RabbitMQ (AMQP) instead of traditional TCP sockets. Inspired by the [Named Pipes transport](https://github.com/dotnet/aspnetcore/tree/main/src/Servers/Kestrel/Transport.NamedPipes) in ASP.NET Core.
+This library provides a reverse proxy over AMQP/RabbitMQ that enables you to expose internal APIs (behind firewalls, on mobile networks, etc.) through a public HTTP gateway. Perfect for scenarios where the backend API cannot be directly accessed due to network restrictions.
 
 ## Structure
 
@@ -27,94 +27,105 @@ dotnet build
 dotnet add package Misiu.Kestrel.Transport.Amqp
 ```
 
+## Architecture
+
+```
+[Internet] → [Public Gateway Server] ←AMQP→ [Client Behind Firewall] → [Local API]
+```
+
+**Gateway Server (Public)**:
+- Receives normal HTTP requests from the internet
+- Serializes requests and sends them via AMQP/RabbitMQ
+- Waits for responses (with timeout)
+- Returns responses to original HTTP callers
+- If timeout occurs, returns 202 Accepted with correlation ID for later retrieval
+
+**Client (Internal/Behind Firewall)**:
+- Runs behind firewall, NAT, or mobile network (no static IP needed)
+- Consumes requests from AMQP queue
+- Forwards to local HTTP API
+- Returns responses via AMQP
+
 ## Usage
 
-### Server
+### Gateway Server (Public)
 
-Configure your ASP.NET Core application to use AMQP transport:
+Deploy this on a publicly accessible server:
 
 ```csharp
 using Misiu.Kestrel.Transport.Amqp;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure AMQP transport
-builder.Services.AddAmqpTransport(options =>
+// Configure AMQP Gateway
+builder.Services.AddAmqpGateway(options =>
 {
-    options.HostName = "localhost";
+    options.HostName = "your-rabbitmq-server.com";
     options.Port = 5672;
     options.UserName = "guest";
     options.Password = "guest";
-    options.RequestQueue = "kestrel.amqp.requests";
-    options.ResponseQueue = "kestrel.amqp.responses";
-});
-
-// Configure Kestrel to use AMQP transport alongside HTTP
-builder.WebHost.ConfigureKestrel(kestrel =>
-{
-    // Standard HTTP endpoint
-    kestrel.ListenLocalhost(5000);
-    
-    // AMQP endpoint
-    kestrel.ListenAmqp("amqp-transport");
+    options.RequestQueue = "amqp.gateway.requests";
+    options.ResponseQueue = "amqp.gateway.responses";
+    options.ImmediateTimeoutSeconds = 3;
+    options.ResultTtlMinutes = 15;
 });
 
 var app = builder.Build();
 
-app.MapGet("/", () => "Hello from AMQP transport!");
+// Map endpoint to retrieve delayed results
+app.MapAmqpResultEndpoint();
+
+// Forward all requests to AMQP
+app.UseAmqpGateway();
+
 app.Run();
 ```
 
-### Client
+### Client (Behind Firewall)
 
-Send HTTP requests via RabbitMQ:
+Run this on your internal network:
 
 ```csharp
-using System.Text;
-using System.Text.Json;
-using RabbitMQ.Client;
+using Misiu.Kestrel.Transport.Amqp;
 
-// Connect to RabbitMQ
-var factory = new ConnectionFactory { HostName = "localhost" };
-using var connection = factory.CreateConnection();
-using var channel = connection.CreateModel();
+var builder = Host.CreateApplicationBuilder(args);
 
-// Build HTTP request envelope
-var request = new
+// Configure AMQP Client
+builder.Services.AddAmqpClient(options =>
 {
-    method = "GET",
-    pathAndQuery = "/api/endpoint",
-    headers = new Dictionary<string, string[]>
-    {
-        ["Accept"] = new[] { "application/json" }
-    }
-};
+    options.HostName = "your-rabbitmq-server.com";
+    options.Port = 5672;
+    options.UserName = "guest";
+    options.Password = "guest";
+    options.RequestQueue = "amqp.gateway.requests";
+    options.ResponseQueue = "amqp.gateway.responses";
+    options.LocalApiBaseUrl = "http://localhost:5000"; // Your local API
+    options.PrefetchCount = 10;
+});
 
-var requestJson = JsonSerializer.Serialize(request);
-var requestBytes = Encoding.UTF8.GetBytes(requestJson);
-
-// Send request
-var props = channel.CreateBasicProperties();
-props.CorrelationId = Guid.NewGuid().ToString();
-channel.BasicPublish("", "kestrel.amqp.requests", props, requestBytes);
-
-// Listen for response on kestrel.amqp.responses queue
+var host = builder.Build();
+await host.RunAsync();
 ```
 
 ## Features
 
-- **Dual Transport Support**: Run HTTP and AMQP transports side-by-side
-- **ASP.NET Core Integration**: Full support for middleware, routing, and minimal APIs
-- **Request Serialization**: Automatic HTTP request/response serialization
-- **Correlation IDs**: Built-in request tracking
+- **Expose Internal APIs**: Make APIs behind firewalls/NAT accessible via public gateway
+- **No Static IP Required**: Client can run on mobile networks, behind corporate firewalls, etc.
+- **Async Processing**: Supports long-running requests with 202 Accepted responses
+- **Correlation Tracking**: Built-in request/response matching
 - **Connection Resilience**: Automatic recovery and topology preservation
+- **Full HTTP Support**: All HTTP methods, headers, and body types
 
 ## How It Works
 
-The transport implements a custom Kestrel connection listener that:
+1. **HTTP Request arrives** at public gateway server
+2. **Gateway serializes** the request (method, path, headers, body) into JSON
+3. **Published to AMQP** queue with correlation ID
+4. **Client consumes** from queue (even behind firewall)
+5. **Client forwards** to local HTTP API
+6. **Response returns** via AMQP with same correlation ID
+7. **Gateway returns** response to original HTTP caller
 
-1. Consumes messages from a RabbitMQ request queue
-2. Deserializes JSON envelopes into raw HTTP/1.1 requests
-3. Feeds them through the standard Kestrel HTTP pipeline
-4. Serializes HTTP responses and publishes them to a response queue
-5. Uses correlation IDs to match requests and responses
+If the client doesn't respond within timeout:
+- Gateway returns **202 Accepted** with correlation ID
+- Client can retrieve result later via `/amqp/result/{correlationId}`

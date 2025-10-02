@@ -33,12 +33,12 @@ public class AmqpTransportOptions
     /// <summary>
     /// Gets or sets the request queue name
     /// </summary>
-    public string RequestQueue { get; set; } = "kestrel.amqp.requests";
+    public string RequestQueue { get; set; } = "amqp.gateway.requests";
 
     /// <summary>
     /// Gets or sets the response queue name
     /// </summary>
-    public string ResponseQueue { get; set; } = "kestrel.amqp.responses";
+    public string ResponseQueue { get; set; } = "amqp.gateway.responses";
 
     /// <summary>
     /// Gets or sets whether messages should be persistent
@@ -56,12 +56,17 @@ public class AmqpTransportOptions
     public long MaxRequestBodyBytes { get; set; } = 10_000_000;
 
     /// <summary>
-    /// Gets or sets the immediate response timeout in seconds
+    /// Gets or sets the immediate response timeout in seconds (for gateway)
     /// </summary>
     public int ImmediateTimeoutSeconds { get; set; } = 3;
 
     /// <summary>
-    /// Gets or sets the result TTL in minutes for late retrieval
+    /// Gets or sets the result TTL in minutes for late retrieval (for gateway)
     /// </summary>
     public int ResultTtlMinutes { get; set; } = 15;
+
+    /// <summary>
+    /// Gets or sets the local API base URL (for client)
+    /// </summary>
+    public string LocalApiBaseUrl { get; set; } = "http://localhost:5000";
 }

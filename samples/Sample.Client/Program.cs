@@ -1,97 +1,39 @@
-using System.Text;
-using System.Text.Json;
-using RabbitMQ.Client;
-using RabbitMQ.Client.Events;
+using Misiu.Kestrel.Transport.Amqp;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
-Console.WriteLine("Sample AMQP Client - Sending HTTP request via RabbitMQ");
-Console.WriteLine("=======================================================");
-
-// Connection settings
-var factory = new ConnectionFactory
-{
-    HostName = "localhost",
-    Port = 5672,
-    UserName = "guest",
-    Password = "guest"
-};
-
-using var connection = factory.CreateConnection();
-using var channel = connection.CreateModel();
-
-// Declare queues
-var requestQueue = "kestrel.amqp.requests";
-var responseQueue = "kestrel.amqp.responses";
-channel.QueueDeclare(requestQueue, durable: true, exclusive: false, autoDelete: false);
-channel.QueueDeclare(responseQueue, durable: true, exclusive: false, autoDelete: false);
-
-// Create a unique correlation ID
-var correlationId = Guid.NewGuid();
-Console.WriteLine($"Correlation ID: {correlationId}");
+Console.WriteLine("Sample AMQP Client - Processing requests from gateway");
+Console.WriteLine("=====================================================");
 Console.WriteLine();
 
-// Build the HTTP request envelope
-var request = new
+var builder = Host.CreateApplicationBuilder(args);
+
+// Configure AMQP Client to consume requests and forward to local API
+builder.Services.AddAmqpClient(options =>
 {
-    method = "GET",
-    pathAndQuery = "/health",
-    headers = new Dictionary<string, string[]>
-    {
-        ["Accept"] = new[] { "application/json" },
-        ["User-Agent"] = new[] { "AMQP-Client/1.0" }
-    }
-};
+    options.HostName = "localhost";
+    options.Port = 5672;
+    options.UserName = "guest";
+    options.Password = "guest";
+    options.RequestQueue = "amqp.gateway.requests";
+    options.ResponseQueue = "amqp.gateway.responses";
+    options.LocalApiBaseUrl = "http://localhost:5001"; // Your actual local API
+    options.PrefetchCount = 10;
+});
 
-var requestJson = JsonSerializer.Serialize(request);
-var requestBytes = Encoding.UTF8.GetBytes(requestJson);
+// Configure logging
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.SetMinimumLevel(LogLevel.Information);
 
-Console.WriteLine($"Sending request: {request.method} {request.pathAndQuery}");
+var host = builder.Build();
 
-// Send the request
-var props = channel.CreateBasicProperties();
-props.CorrelationId = correlationId.ToString();
-props.Persistent = true;
-
-channel.BasicPublish(
-    exchange: "",
-    routingKey: requestQueue,
-    mandatory: false,
-    basicProperties: props,
-    body: requestBytes);
-
-Console.WriteLine("Request sent. Waiting for response...");
+Console.WriteLine("Starting AMQP Client Consumer...");
+Console.WriteLine($"Forwarding requests to: http://localhost:5001");
+Console.WriteLine($"Consuming from: amqp.gateway.requests");
+Console.WriteLine();
+Console.WriteLine("Press Ctrl+C to exit");
 Console.WriteLine();
 
-// Set up consumer for responses
-var responseReceived = false;
-var consumer = new EventingBasicConsumer(channel);
-consumer.Received += (sender, ea) =>
-{
-    if (ea.BasicProperties.CorrelationId == correlationId.ToString())
-    {
-        var responseText = Encoding.UTF8.GetString(ea.Body.ToArray());
-        Console.WriteLine("Response received:");
-        Console.WriteLine(responseText);
-        Console.WriteLine();
-        
-        responseReceived = true;
-        channel.BasicAck(ea.DeliveryTag, false);
-    }
-};
-
-channel.BasicConsume(responseQueue, autoAck: false, consumer: consumer);
-
-// Wait for response (with timeout)
-var timeout = TimeSpan.FromSeconds(10);
-var startTime = DateTime.UtcNow;
-while (!responseReceived && (DateTime.UtcNow - startTime) < timeout)
-{
-    Thread.Sleep(100);
-}
-
-if (!responseReceived)
-{
-    Console.WriteLine("Timeout: No response received within 10 seconds.");
-}
-
-Console.WriteLine("Press any key to exit...");
-Console.ReadKey();
+await host.RunAsync();
