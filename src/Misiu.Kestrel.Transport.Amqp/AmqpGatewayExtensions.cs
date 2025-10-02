@@ -79,15 +79,21 @@ public static class AmqpGatewayExtensions
                 context.Response.Headers["X-Server-Started-At-Utc"] = envelope.ServerStartedAtUtc.ToString("O");
                 context.Response.Headers["X-Server-Completed-At-Utc"] = envelope.ServerCompletedAtUtc.ToString("O");
                 
-                // Add original headers
+                // Add original headers (excluding hop-by-hop headers which are invalid for HTTP/2 and HTTP/3)
+                var hopByHopHeaders = new[] { "Connection", "Keep-Alive", "Transfer-Encoding", "Upgrade", "Proxy-Connection" };
                 foreach (var header in envelope.Headers)
                 {
-                    context.Response.Headers[header.Key] = header.Value;
+                    if (!hopByHopHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase))
+                    {
+                        context.Response.Headers[header.Key] = header.Value;
+                    }
                 }
                 
                 // Write body if present
                 if (envelope.Body != null && envelope.Body.Length > 0)
                 {
+                    // Set Content-Length to avoid chunked transfer encoding
+                    context.Response.ContentLength = envelope.Body.Length;
                     await context.Response.Body.WriteAsync(envelope.Body);
                 }
             }

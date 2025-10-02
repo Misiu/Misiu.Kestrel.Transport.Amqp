@@ -173,13 +173,20 @@ public class AmqpGatewayMiddleware
             context.Response.Headers["X-CorrelationId"] = correlationId.ToString();
             context.Response.Headers["X-Processing-Time-Ms"] = response.ProcessingMilliseconds.ToString();
 
+            // Copy headers (excluding hop-by-hop headers which are invalid for HTTP/2 and HTTP/3)
+            var hopByHopHeaders = new[] { "Connection", "Keep-Alive", "Transfer-Encoding", "Upgrade", "Proxy-Connection" };
             foreach (var header in response.Headers)
             {
-                context.Response.Headers[header.Key] = header.Value;
+                if (!hopByHopHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    context.Response.Headers[header.Key] = header.Value;
+                }
             }
 
             if (response.Body != null && response.Body.Length > 0)
             {
+                // Set Content-Length to avoid chunked transfer encoding
+                context.Response.ContentLength = response.Body.Length;
                 await context.Response.Body.WriteAsync(response.Body);
             }
         }
