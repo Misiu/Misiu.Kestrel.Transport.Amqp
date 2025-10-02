@@ -6,12 +6,62 @@ namespace Misiu.Kestrel.Transport.Amqp;
 public class AmqpTransportOptions
 {
     /// <summary>
-    /// Gets or sets the AMQP connection string
+    /// Gets or sets the RabbitMQ hostname
     /// </summary>
-    public string? ConnectionString { get; set; }
+    public string HostName { get; set; } = "localhost";
 
     /// <summary>
-    /// Gets or sets the maximum message size
+    /// Gets or sets the RabbitMQ port
     /// </summary>
-    public int MaxMessageSize { get; set; } = 65536;
+    public int Port { get; set; } = 5672;
+
+    /// <summary>
+    /// Gets or sets the RabbitMQ virtual host
+    /// </summary>
+    public string VirtualHost { get; set; } = "/";
+
+    /// <summary>
+    /// Gets or sets the RabbitMQ username
+    /// </summary>
+    public string UserName { get; set; } = "guest";
+
+    /// <summary>
+    /// Gets or sets the RabbitMQ password
+    /// </summary>
+    public string Password { get; set; } = "guest";
+
+    /// <summary>
+    /// Gets or sets the request queue name
+    /// </summary>
+    public string RequestQueue { get; set; } = "kestrel.amqp.requests";
+
+    /// <summary>
+    /// Gets or sets the response queue name
+    /// </summary>
+    public string ResponseQueue { get; set; } = "kestrel.amqp.responses";
+
+    /// <summary>
+    /// Gets or sets whether messages should be persistent
+    /// </summary>
+    public bool Persistent { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the prefetch count for consuming messages
+    /// </summary>
+    public ushort PrefetchCount { get; set; } = 32;
+
+    /// <summary>
+    /// Gets or sets the maximum request body size in bytes
+    /// </summary>
+    public long MaxRequestBodyBytes { get; set; } = 10_000_000;
+
+    /// <summary>
+    /// Gets or sets the immediate response timeout in seconds
+    /// </summary>
+    public int ImmediateTimeoutSeconds { get; set; } = 3;
+
+    /// <summary>
+    /// Gets or sets the result TTL in minutes for late retrieval
+    /// </summary>
+    public int ResultTtlMinutes { get; set; } = 15;
 }
