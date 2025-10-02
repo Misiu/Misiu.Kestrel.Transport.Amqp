@@ -32,6 +32,28 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
+        // Purge RabbitMQ queues to ensure clean state
+        try
+        {
+            var factory = new RabbitMQ.Client.ConnectionFactory
+            {
+                HostName = _rabbitMq.HostName,
+                Port = _rabbitMq.Port,
+                UserName = _rabbitMq.UserName,
+                Password = _rabbitMq.Password
+            };
+            using var connection = factory.CreateConnection();
+            using var channel = connection.CreateModel();
+            
+            // Purge request and response queues
+            try { channel.QueuePurge("amqp.gateway.requests"); } catch { }
+            try { channel.QueuePurge("amqp.gateway.responses"); } catch { }
+        }
+        catch
+        {
+            // Ignore errors - queues might not exist yet
+        }
+        
         // Create and start the local API
         _localApi = TestServerFactory.CreateLocalApi();
         await _localApi.StartAsync().WaitAsync(TimeSpan.FromSeconds(10));
@@ -48,7 +70,9 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
             _localApiBaseUrl);
 
         await _clientHost.StartAsync().WaitAsync(TimeSpan.FromSeconds(10));
-        await Task.Delay(1000); // Wait for client to connect to RabbitMQ
+        
+        // Small delay to let client initialize
+        await Task.Delay(500);
 
         // Create and start the gateway server
         _gatewayServer = TestServerFactory.CreateGatewayServer(
@@ -65,7 +89,8 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
 
         _httpClient = new HttpClient { BaseAddress = new Uri(_gatewayBaseUrl) };
         
-        await Task.Delay(500); // Wait for gateway to connect to RabbitMQ
+        // Small delay to let gateway initialize
+        await Task.Delay(500);
     }
 
     public async Task DisposeAsync()
