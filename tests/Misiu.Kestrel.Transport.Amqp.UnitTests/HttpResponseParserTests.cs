@@ -225,6 +225,99 @@ public class HttpResponseParserTests
         Assert.Equal("application/json", envelope.Headers["Content-Type"][0].Trim());
     }
 
+    [Fact]
+    public void ParseRawHttpResponse_ChunkedTransferEncoding_DecodesCorrectly()
+    {
+        // Arrange - simulate chunked encoding from Kestrel
+        // This is the actual format causing the issue: 82\r\n{json}\r\n0\r\n\r\n
+        var jsonBody = "{\"message\":\"Data from local API behind firewall\",\"timestamp\":\"2025-10-02T11:55:15.2083072+00:00\",\"source\":\"AMQP Transport Client\"}";
+        var chunkSize = jsonBody.Length.ToString("X"); // 82 in hex = 130 in decimal
+        
+        var response = "HTTP/1.1 200 OK\r\n" +
+                      "Content-Type: application/json; charset=utf-8\r\n" +
+                      "Transfer-Encoding: chunked\r\n" +
+                      "\r\n" +
+                      chunkSize + "\r\n" +
+                      jsonBody + "\r\n" +
+                      "0\r\n" +
+                      "\r\n";
+
+        // Act
+        var envelope = ParseHttpResponse(Encoding.UTF8.GetBytes(response));
+
+        // Assert
+        Assert.Equal(200, envelope.StatusCode);
+        Assert.NotNull(envelope.Body);
+        var bodyText = Encoding.UTF8.GetString(envelope.Body);
+        Assert.Equal(jsonBody, bodyText);
+        
+        // Verify Transfer-Encoding header is NOT in the final headers (hop-by-hop header)
+        Assert.DoesNotContain("Transfer-Encoding", envelope.Headers.Keys);
+    }
+
+    [Fact]
+    public void ParseRawHttpResponse_ChunkedWithMultipleChunks_DecodesCorrectly()
+    {
+        // Arrange - multiple chunks
+        var response = "HTTP/1.1 200 OK\r\n" +
+                      "Content-Type: text/plain\r\n" +
+                      "Transfer-Encoding: chunked\r\n" +
+                      "\r\n" +
+                      "7\r\n" +
+                      "Mozilla\r\n" +
+                      "9\r\n" +
+                      "Developer\r\n" +
+                      "7\r\n" +
+                      "Network\r\n" +
+                      "0\r\n" +
+                      "\r\n";
+
+        // Act
+        var envelope = ParseHttpResponse(Encoding.UTF8.GetBytes(response));
+
+        // Assert
+        Assert.Equal(200, envelope.StatusCode);
+        Assert.NotNull(envelope.Body);
+        var bodyText = Encoding.UTF8.GetString(envelope.Body);
+        Assert.Equal("MozillaDeveloperNetwork", bodyText);
+    }
+
+    [Fact]
+    public void ParseRawHttpResponse_FiltersHopByHopHeaders()
+    {
+        // Arrange - response with hop-by-hop headers that should be filtered
+        var response = "HTTP/1.1 200 OK\r\n" +
+                      "Content-Type: application/json\r\n" +
+                      "Connection: keep-alive\r\n" +
+                      "Keep-Alive: timeout=5\r\n" +
+                      "Transfer-Encoding: chunked\r\n" +
+                      "Upgrade: h2c\r\n" +
+                      "Proxy-Connection: keep-alive\r\n" +
+                      "X-Custom-Header: should-remain\r\n" +
+                      "\r\n" +
+                      "d\r\n" +
+                      "{\"test\":true}\r\n" +
+                      "0\r\n" +
+                      "\r\n";
+
+        // Act
+        var envelope = ParseHttpResponse(Encoding.UTF8.GetBytes(response));
+
+        // Assert
+        Assert.Equal(200, envelope.StatusCode);
+        
+        // These hop-by-hop headers should be filtered out
+        Assert.DoesNotContain("Connection", envelope.Headers.Keys);
+        Assert.DoesNotContain("Keep-Alive", envelope.Headers.Keys);
+        Assert.DoesNotContain("Transfer-Encoding", envelope.Headers.Keys);
+        Assert.DoesNotContain("Upgrade", envelope.Headers.Keys);
+        Assert.DoesNotContain("Proxy-Connection", envelope.Headers.Keys);
+        
+        // But custom headers should remain
+        Assert.Contains("Content-Type", envelope.Headers.Keys);
+        Assert.Contains("X-Custom-Header", envelope.Headers.Keys);
+    }
+
     // Helper methods
     private static byte[] BuildRawHttpResponse(
         int statusCode,
@@ -263,8 +356,10 @@ public class HttpResponseParserTests
         var statusCode = int.Parse(statusParts[1]);
 
         // Parse headers
-        var headers = new Dictionary<string, string[]>();
+        var headers = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
         int bodyStartIndex = 0;
+        bool isChunked = false;
+        
         for (int i = 1; i < lines.Length; i++)
         {
             if (string.IsNullOrEmpty(lines[i]))
@@ -278,6 +373,13 @@ public class HttpResponseParserTests
             {
                 var headerName = lines[i].Substring(0, colonIndex).Trim();
                 var headerValue = lines[i].Substring(colonIndex + 1).Trim();
+
+                // Detect chunked transfer encoding
+                if (headerName.Equals("Transfer-Encoding", StringComparison.OrdinalIgnoreCase) &&
+                    headerValue.Contains("chunked", StringComparison.OrdinalIgnoreCase))
+                {
+                    isChunked = true;
+                }
 
                 if (headers.ContainsKey(headerName))
                 {
@@ -294,14 +396,30 @@ public class HttpResponseParserTests
             }
         }
 
-        // Extract body
+        // Filter out hop-by-hop headers (these are invalid for HTTP/2 and HTTP/3)
+        var hopByHopHeaders = new[] { "Connection", "Keep-Alive", "Transfer-Encoding", "Upgrade", "Proxy-Connection" };
+        foreach (var hopHeader in hopByHopHeaders)
+        {
+            headers.Remove(hopHeader);
+        }
+
+        // Extract and decode body
         byte[]? body = null;
         if (bodyStartIndex < lines.Length)
         {
-            var bodyText = string.Join("\r\n", lines, bodyStartIndex, lines.Length - bodyStartIndex);
-            if (!string.IsNullOrEmpty(bodyText))
+            if (isChunked)
             {
-                body = Encoding.UTF8.GetBytes(bodyText);
+                // Decode chunked transfer encoding
+                body = DecodeChunkedBodyTest(lines, bodyStartIndex);
+            }
+            else
+            {
+                // Regular body (everything after the empty line)
+                var bodyText = string.Join("\r\n", lines, bodyStartIndex, lines.Length - bodyStartIndex);
+                if (!string.IsNullOrEmpty(bodyText))
+                {
+                    body = Encoding.UTF8.GetBytes(bodyText);
+                }
             }
         }
 
@@ -311,5 +429,69 @@ public class HttpResponseParserTests
             Headers = headers,
             Body = body
         };
+    }
+    
+    private static byte[]? DecodeChunkedBodyTest(string[] lines, int startIndex)
+    {
+        var bodyParts = new List<byte[]>();
+        int i = startIndex;
+        
+        while (i < lines.Length)
+        {
+            // Read chunk size line
+            var chunkSizeLine = lines[i].Trim();
+            if (string.IsNullOrEmpty(chunkSizeLine))
+            {
+                i++;
+                continue;
+            }
+            
+            // Parse chunk size (hex)
+            // Handle chunk extensions (e.g., "1a; name=value")
+            var semicolonIndex = chunkSizeLine.IndexOf(';');
+            if (semicolonIndex >= 0)
+            {
+                chunkSizeLine = chunkSizeLine.Substring(0, semicolonIndex);
+            }
+            
+            if (!int.TryParse(chunkSizeLine, System.Globalization.NumberStyles.HexNumber, null, out var chunkSize))
+            {
+                // Invalid chunk size, stop parsing
+                break;
+            }
+            
+            // Chunk size 0 means end of chunks
+            if (chunkSize == 0)
+            {
+                break;
+            }
+            
+            i++;
+            
+            // Read chunk data
+            if (i < lines.Length)
+            {
+                var chunkData = lines[i];
+                bodyParts.Add(Encoding.UTF8.GetBytes(chunkData));
+                i++;
+            }
+        }
+        
+        if (bodyParts.Count == 0)
+        {
+            return null;
+        }
+        
+        // Combine all chunks
+        var totalLength = bodyParts.Sum(p => p.Length);
+        var result = new byte[totalLength];
+        int offset = 0;
+        foreach (var part in bodyParts)
+        {
+            Buffer.BlockCopy(part, 0, result, offset, part.Length);
+            offset += part.Length;
+        }
+        
+        return result;
     }
 }

@@ -322,8 +322,10 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
             var statusCode = int.Parse(statusParts[1]);
             
             // Parse headers
-            var headers = new Dictionary<string, string[]>();
+            var headers = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
             int bodyStartIndex = 0;
+            bool isChunked = false;
+            
             for (int i = 1; i < lines.Length; i++)
             {
                 if (string.IsNullOrEmpty(lines[i]))
@@ -337,6 +339,13 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
                 {
                     var headerName = lines[i].Substring(0, colonIndex).Trim();
                     var headerValue = lines[i].Substring(colonIndex + 1).Trim();
+                    
+                    // Detect chunked transfer encoding
+                    if (headerName.Equals("Transfer-Encoding", StringComparison.OrdinalIgnoreCase) &&
+                        headerValue.Contains("chunked", StringComparison.OrdinalIgnoreCase))
+                    {
+                        isChunked = true;
+                    }
                     
                     if (headers.ContainsKey(headerName))
                     {
@@ -353,14 +362,30 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
                 }
             }
             
-            // Extract body (everything after the empty line)
+            // Filter out hop-by-hop headers (these are invalid for HTTP/2 and HTTP/3)
+            var hopByHopHeaders = new[] { "Connection", "Keep-Alive", "Transfer-Encoding", "Upgrade", "Proxy-Connection" };
+            foreach (var hopHeader in hopByHopHeaders)
+            {
+                headers.Remove(hopHeader);
+            }
+            
+            // Extract and decode body
             byte[]? body = null;
             if (bodyStartIndex < lines.Length)
             {
-                var bodyText = string.Join("\r\n", lines, bodyStartIndex, lines.Length - bodyStartIndex);
-                if (!string.IsNullOrEmpty(bodyText))
+                if (isChunked)
                 {
-                    body = Encoding.UTF8.GetBytes(bodyText);
+                    // Decode chunked transfer encoding
+                    body = DecodeChunkedBody(lines, bodyStartIndex);
+                }
+                else
+                {
+                    // Regular body (everything after the empty line)
+                    var bodyText = string.Join("\r\n", lines, bodyStartIndex, lines.Length - bodyStartIndex);
+                    if (!string.IsNullOrEmpty(bodyText))
+                    {
+                        body = Encoding.UTF8.GetBytes(bodyText);
+                    }
                 }
             }
             
@@ -372,6 +397,70 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
                 Body = body,
                 ProcessingMilliseconds = 0 // Not tracked in Transport approach
             };
+        }
+        
+        byte[]? DecodeChunkedBody(string[] lines, int startIndex)
+        {
+            var bodyParts = new List<byte[]>();
+            int i = startIndex;
+            
+            while (i < lines.Length)
+            {
+                // Read chunk size line
+                var chunkSizeLine = lines[i].Trim();
+                if (string.IsNullOrEmpty(chunkSizeLine))
+                {
+                    i++;
+                    continue;
+                }
+                
+                // Parse chunk size (hex)
+                // Handle chunk extensions (e.g., "1a; name=value")
+                var semicolonIndex = chunkSizeLine.IndexOf(';');
+                if (semicolonIndex >= 0)
+                {
+                    chunkSizeLine = chunkSizeLine.Substring(0, semicolonIndex);
+                }
+                
+                if (!int.TryParse(chunkSizeLine, System.Globalization.NumberStyles.HexNumber, null, out var chunkSize))
+                {
+                    // Invalid chunk size, stop parsing
+                    break;
+                }
+                
+                // Chunk size 0 means end of chunks
+                if (chunkSize == 0)
+                {
+                    break;
+                }
+                
+                i++;
+                
+                // Read chunk data
+                if (i < lines.Length)
+                {
+                    var chunkData = lines[i];
+                    bodyParts.Add(Encoding.UTF8.GetBytes(chunkData));
+                    i++;
+                }
+            }
+            
+            if (bodyParts.Count == 0)
+            {
+                return null;
+            }
+            
+            // Combine all chunks
+            var totalLength = bodyParts.Sum(p => p.Length);
+            var result = new byte[totalLength];
+            int offset = 0;
+            foreach (var part in bodyParts)
+            {
+                Buffer.BlockCopy(part, 0, result, offset, part.Length);
+                offset += part.Length;
+            }
+            
+            return result;
         }
 
         return (buf, PublishAsync);
