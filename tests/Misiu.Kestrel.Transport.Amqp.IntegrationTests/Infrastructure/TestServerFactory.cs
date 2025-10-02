@@ -21,7 +21,9 @@ public static class TestServerFactory
         string userName, 
         string password,
         int immediateTimeoutSeconds = 3,
-        string? pathPrefixToRemove = null)
+        string? pathPrefixToRemove = null,
+        string? requestQueue = null,
+        string? responseQueue = null)
     {
         var builder = WebApplication.CreateBuilder();
         
@@ -33,8 +35,8 @@ public static class TestServerFactory
             options.Port = port;
             options.UserName = userName;
             options.Password = password;
-            options.RequestQueue = "amqp.gateway.requests";
-            options.ResponseQueue = "amqp.gateway.responses";
+            options.RequestQueue = requestQueue ?? "amqp.gateway.requests";
+            options.ResponseQueue = responseQueue ?? "amqp.gateway.responses";
             options.ImmediateTimeoutSeconds = immediateTimeoutSeconds;
             options.ResultTtlMinutes = 15;
             options.PathPrefixToRemove = pathPrefixToRemove;
@@ -59,7 +61,9 @@ public static class TestServerFactory
         string hostName,
         int port,
         string userName,
-        string password)
+        string password,
+        string? requestQueue = null,
+        string? responseQueue = null)
     {
         var builder = WebApplication.CreateBuilder();
 
@@ -69,8 +73,8 @@ public static class TestServerFactory
             options.Port = port;
             options.UserName = userName;
             options.Password = password;
-            options.RequestQueue = "amqp.gateway.requests";
-            options.ResponseQueue = "amqp.gateway.responses";
+            options.RequestQueue = requestQueue ?? "amqp.gateway.requests";
+            options.ResponseQueue = responseQueue ?? "amqp.gateway.responses";
         });
 
         builder.WebHost.ConfigureKestrel(kestrel =>

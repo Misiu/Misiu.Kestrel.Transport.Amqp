@@ -60,8 +60,12 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
             TopologyRecoveryEnabled = true
         };
 
-        _conn = factory.CreateConnection($"AmqpTransport-{_endpoint.Name}");
+        // Use unique connection name to ensure complete isolation between instances
+        var connectionName = $"AmqpTransport-{_endpoint.Name}-{Guid.NewGuid().ToString().Substring(0, 8)}";
+        _conn = factory.CreateConnection(connectionName);
         _ch = _conn.CreateModel();
+        
+        _logger.LogInformation("Creating AMQP connection '{ConnectionName}'", connectionName);
 
         _ch.QueueDeclare(_opts.RequestQueue, durable: _opts.Persistent, exclusive: false, autoDelete: false, arguments: null);
         _ch.QueueDeclare(_opts.ResponseQueue, durable: _opts.Persistent, exclusive: false, autoDelete: false, arguments: null);

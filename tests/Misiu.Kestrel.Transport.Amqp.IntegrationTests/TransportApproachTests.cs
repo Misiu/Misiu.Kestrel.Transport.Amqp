@@ -27,37 +27,22 @@ public class TransportApproachTests
 
     private async Task<(WebApplication clientApp, WebApplication gatewayServer, HttpClient httpClient)> SetupTestAsync(int timeoutSeconds = 10)
     {
-        // Purge RabbitMQ queues to ensure clean state
-        try
-        {
-            var factory = new RabbitMQ.Client.ConnectionFactory
-            {
-                HostName = _rabbitMq.HostName,
-                Port = _rabbitMq.Port,
-                UserName = _rabbitMq.UserName,
-                Password = _rabbitMq.Password
-            };
-            using var connection = factory.CreateConnection();
-            using var channel = connection.CreateModel();
-            
-            // Purge request and response queues
-            try { channel.QueuePurge("amqp.gateway.requests"); } catch { }
-            try { channel.QueuePurge("amqp.gateway.responses"); } catch { }
-        }
-        catch
-        {
-            // Ignore errors - queues might not exist yet
-        }
+        // Use unique queue names for each test to ensure complete isolation
+        var testId = Guid.NewGuid().ToString().Substring(0, 8);
+        var requestQueue = $"amqp.gateway.requests.{testId}";
+        var responseQueue = $"amqp.gateway.responses.{testId}";
         
-        // Create and start the client app (using Transport approach)
+        // Create and start the client app (using Transport approach)  
         var clientApp = TestServerFactory.CreateTransportClient(
             _rabbitMq.HostName,
             _rabbitMq.Port,
             _rabbitMq.UserName,
-            _rabbitMq.Password);
+            _rabbitMq.Password,
+            requestQueue,
+            responseQueue);
 
         await clientApp.StartAsync();
-        await Task.Delay(1500); // Wait for client to connect to RabbitMQ and start listening
+        await Task.Delay(1500); // Wait for client to connect to RabbitMQ and start consuming
 
         // Create and start the gateway server
         var gatewayServer = TestServerFactory.CreateGatewayServer(
@@ -65,7 +50,9 @@ public class TransportApproachTests
             _rabbitMq.Port,
             _rabbitMq.UserName,
             _rabbitMq.Password,
-            immediateTimeoutSeconds: timeoutSeconds);
+            immediateTimeoutSeconds: timeoutSeconds,
+            requestQueue: requestQueue,
+            responseQueue: responseQueue);
 
         await gatewayServer.StartAsync();
         
@@ -84,6 +71,9 @@ public class TransportApproachTests
     {
         httpClient?.Dispose();
         
+        // Wait a bit to ensure any in-flight requests are fully processed
+        await Task.Delay(500);
+        
         if (gatewayServer != null)
         {
             await gatewayServer.StopAsync();
@@ -96,30 +86,9 @@ public class TransportApproachTests
             await clientApp.DisposeAsync();
         }
         
-        // Wait longer to ensure RabbitMQ consumer is fully cancelled and connections are closed
-        await Task.Delay(2000);
-        
-        // Purge queues AFTER stopping to ensure no stale messages
-        try
-        {
-            var factory = new RabbitMQ.Client.ConnectionFactory
-            {
-                HostName = _rabbitMq.HostName,
-                Port = _rabbitMq.Port,
-                UserName = _rabbitMq.UserName,
-                Password = _rabbitMq.Password
-            };
-            using var connection = factory.CreateConnection();
-            using var channel = connection.CreateModel();
-            
-            // Purge request and response queues
-            try { channel.QueuePurge("amqp.gateway.requests"); } catch { }
-            try { channel.QueuePurge("amqp.gateway.responses"); } catch { }
-        }
-        catch
-        {
-            // Ignore errors
-        }
+        // Wait to ensure RabbitMQ consumer is fully cancelled and connections are closed
+        // Using unique queue names per test, so no need to purge
+        await Task.Delay(500);
     }
 
     [Fact]
