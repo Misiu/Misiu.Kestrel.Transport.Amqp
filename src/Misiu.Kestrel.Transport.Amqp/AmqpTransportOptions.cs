@@ -69,4 +69,16 @@ public class AmqpTransportOptions
     /// Gets or sets the local API base URL (for client)
     /// </summary>
     public string LocalApiBaseUrl { get; set; } = "http://localhost:5000";
+
+    /// <summary>
+    /// Gets or sets the path prefix to remove from incoming requests (for client)
+    /// Example: "/proxy" will transform "/proxy/api/data" to "/api/data"
+    /// </summary>
+    public string? PathPrefixToRemove { get; set; }
+
+    /// <summary>
+    /// Gets or sets the path prefix to add to outgoing requests (for client)
+    /// Example: "/api/v1" will transform "/data" to "/api/v1/data"
+    /// </summary>
+    public string? PathPrefixToAdd { get; set; }
 }

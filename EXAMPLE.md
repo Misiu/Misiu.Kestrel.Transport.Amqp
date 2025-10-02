@@ -69,6 +69,10 @@ app.Run("https://api.example.com");
 
 ### 4. Run the Client (Behind Firewall)
 
+**Choose one of two approaches** - see [APPROACHES.md](APPROACHES.md) for full comparison.
+
+#### Option A: BackgroundService (Simpler, forwards to existing API)
+
 Run this on the same network as your local API:
 
 ```csharp
@@ -86,10 +90,49 @@ builder.Services.AddAmqpClient(options =>
     options.ResponseQueue = "amqp.gateway.responses";
     options.LocalApiBaseUrl = "http://localhost:5001";  // Your local API
     options.PrefetchCount = 10;
+    
+    // Optional: Transform paths
+    // options.PathPrefixToRemove = "/proxy";
 });
 
 var host = builder.Build();
 await host.RunAsync();
+```
+
+#### Option B: Custom Transport (Better performance, Kestrel integration)
+
+Run this instead if you want native Kestrel HTTP parsing:
+
+```csharp
+using Misiu.Kestrel.Transport.Amqp;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddAmqpTransport(options =>
+{
+    options.HostName = "rabbitmq.example.com";
+    options.Port = 5672;
+    options.RequestQueue = "amqp.gateway.requests";
+    options.ResponseQueue = "amqp.gateway.responses";
+});
+
+builder.WebHost.ConfigureKestrel(kestrel =>
+{
+    kestrel.ListenAmqp("amqp-client");
+});
+
+var app = builder.Build();
+
+// Define your API endpoints here
+app.MapGet("/api/data", () => new { data = "Hello from local API!" });
+app.MapPost("/api/echo", async (HttpRequest req) => 
+{
+    using var reader = new StreamReader(req.Body);
+    var body = await reader.ReadToEndAsync();
+    return Results.Ok(new { received = body });
+});
+
+app.Run();
 ```
 
 ## Usage

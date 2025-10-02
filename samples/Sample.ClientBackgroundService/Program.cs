@@ -3,8 +3,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-Console.WriteLine("Sample AMQP Client - Processing requests from gateway");
-Console.WriteLine("=====================================================");
+Console.WriteLine("Sample AMQP Client (BackgroundService) - Processing requests from gateway");
+Console.WriteLine("=========================================================================");
 Console.WriteLine();
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -20,6 +20,10 @@ builder.Services.AddAmqpClient(options =>
     options.ResponseQueue = "amqp.gateway.responses";
     options.LocalApiBaseUrl = "http://localhost:5001"; // Your actual local API
     options.PrefetchCount = 10;
+    
+    // Optional path transformation
+    // options.PathPrefixToRemove = "/proxy"; // Remove "/proxy" from incoming paths
+    // options.PathPrefixToAdd = "/api/v1";   // Add "/api/v1" to outgoing paths
 });
 
 // Configure logging

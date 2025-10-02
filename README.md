@@ -83,7 +83,11 @@ app.Run();
 
 ### Client (Behind Firewall)
 
-Run this on your internal network:
+**Two approaches available** - see [APPROACHES.md](APPROACHES.md) for detailed comparison.
+
+#### Approach 1: BackgroundService (Recommended for most use cases)
+
+Simple forwarding to any existing HTTP API:
 
 ```csharp
 using Misiu.Kestrel.Transport.Amqp;
@@ -101,10 +105,41 @@ builder.Services.AddAmqpClient(options =>
     options.ResponseQueue = "amqp.gateway.responses";
     options.LocalApiBaseUrl = "http://localhost:5000"; // Your local API
     options.PrefetchCount = 10;
+    
+    // Optional path transformation
+    options.PathPrefixToRemove = "/proxy";
+    options.PathPrefixToAdd = "/api/v1";
 });
 
 var host = builder.Build();
 await host.RunAsync();
+```
+
+#### Approach 2: Custom Kestrel Transport (Best performance)
+
+Uses Kestrel's native HTTP parser:
+
+```csharp
+using Misiu.Kestrel.Transport.Amqp;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddAmqpTransport(options =>
+{
+    options.HostName = "your-rabbitmq-server.com";
+    options.Port = 5672;
+    options.RequestQueue = "amqp.gateway.requests";
+    options.ResponseQueue = "amqp.gateway.responses";
+});
+
+builder.WebHost.ConfigureKestrel(kestrel =>
+{
+    kestrel.ListenAmqp("amqp-client");
+});
+
+var app = builder.Build();
+app.MapGet("/api/data", () => new { data = "Hello!" });
+app.Run();
 ```
 
 ## Features
