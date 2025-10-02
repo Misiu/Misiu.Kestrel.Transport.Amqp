@@ -41,12 +41,13 @@ public class TransportApproachTests : IAsyncLifetime
         await Task.Delay(1000); // Wait for client to connect to RabbitMQ
 
         // Create and start the gateway server
+        // Using longer timeout (10s) to accommodate sequential test execution
         _gatewayServer = TestServerFactory.CreateGatewayServer(
             _rabbitMq.HostName,
             _rabbitMq.Port,
             _rabbitMq.UserName,
             _rabbitMq.Password,
-            immediateTimeoutSeconds: 3);
+            immediateTimeoutSeconds: 10);
 
         await _gatewayServer.StartAsync();
         

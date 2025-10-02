@@ -1,5 +1,6 @@
 using System.IO.Pipelines;
 using System.Net;
+using System.Text;
 using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Logging;
@@ -74,8 +75,8 @@ public sealed class AmqpConnectionContext : ConnectionContext
             Transport.Output.Complete();
             
             // Drain full raw HTTP response written by Kestrel into the output reader
-            // Use a shorter timeout (2s) to prevent hanging if pipe isn't completed
-            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            // Use a 5-second timeout to prevent hanging if pipe isn't completed properly
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var ms = new MemoryStream();
             
             var drainTask = Task.Run(async () =>
@@ -110,7 +111,19 @@ public sealed class AmqpConnectionContext : ConnectionContext
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning("Timeout while draining output pipe for {ConnectionId}, continuing with disposal", _id);
+            _logger.LogWarning("Timeout while draining output pipe for {ConnectionId}, publishing error response", _id);
+            
+            // Publish a 500 error response so gateway doesn't timeout
+            try
+            {
+                var errorResponse = Encoding.UTF8.GetBytes("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
+                await _publishResponse(errorResponse).ConfigureAwait(false);
+            }
+            catch (Exception publishEx)
+            {
+                _logger.LogError(publishEx, "Failed to publish error response for {ConnectionId}", _id);
+            }
+            
             try
             {
                 _channel.BasicAck(_deliveryTag, multiple: false);
