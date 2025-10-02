@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Misiu.Kestrel.Transport.Amqp;
@@ -18,6 +19,24 @@ public static class AmqpClientExtensions
         Action<AmqpTransportOptions> configure)
     {
         services.Configure(configure);
+        services.AddHttpClient("AmqpClient");
+        services.AddHostedService<AmqpClientConsumer>();
+        return services;
+    }
+
+    /// <summary>
+    /// Adds AMQP Client services to the service collection using configuration
+    /// </summary>
+    /// <param name="services">The service collection</param>
+    /// <param name="configuration">The configuration section</param>
+    /// <param name="sectionName">The configuration section name (default: "AmqpClient")</param>
+    /// <returns>The service collection for chaining</returns>
+    public static IServiceCollection AddAmqpClient(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        string sectionName = "AmqpClient")
+    {
+        services.Configure<AmqpTransportOptions>(configuration.GetSection(sectionName));
         services.AddHttpClient("AmqpClient");
         services.AddHostedService<AmqpClientConsumer>();
         return services;

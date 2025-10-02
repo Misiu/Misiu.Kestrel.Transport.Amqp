@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Misiu.Kestrel.Transport.Amqp;
@@ -22,6 +23,23 @@ public static class AmqpGatewayExtensions
         Action<AmqpTransportOptions> configure)
     {
         services.Configure(configure);
+        services.AddMemoryCache();
+        return services;
+    }
+
+    /// <summary>
+    /// Adds AMQP Gateway services to the service collection using configuration
+    /// </summary>
+    /// <param name="services">The service collection</param>
+    /// <param name="configuration">The configuration section</param>
+    /// <param name="sectionName">The configuration section name (default: "AmqpGateway")</param>
+    /// <returns>The service collection for chaining</returns>
+    public static IServiceCollection AddAmqpGateway(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        string sectionName = "AmqpGateway")
+    {
+        services.Configure<AmqpTransportOptions>(configuration.GetSection(sectionName));
         services.AddMemoryCache();
         return services;
     }

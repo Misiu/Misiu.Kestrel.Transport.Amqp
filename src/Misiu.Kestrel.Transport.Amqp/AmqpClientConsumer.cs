@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -17,6 +19,7 @@ public class AmqpClientConsumer : BackgroundService
     private readonly ILogger<AmqpClientConsumer> _logger;
     private readonly AmqpTransportOptions _options;
     private readonly HttpClient _httpClient;
+    private readonly IServer? _server;
     private IConnection? _connection;
     private IModel? _channel;
 
@@ -26,13 +29,21 @@ public class AmqpClientConsumer : BackgroundService
     public AmqpClientConsumer(
         ILogger<AmqpClientConsumer> logger,
         IOptions<AmqpTransportOptions> options,
-        IHttpClientFactory httpClientFactory)
+        IHttpClientFactory httpClientFactory,
+        IServer? server = null)
     {
         _logger = logger;
         _options = options.Value;
         _httpClient = httpClientFactory.CreateClient("AmqpClient");
+        _server = server;
         
-        if (!string.IsNullOrEmpty(_options.LocalApiBaseUrl))
+        // Auto-detect local API URL if not specified
+        if (string.IsNullOrEmpty(_options.LocalApiBaseUrl))
+        {
+            // Will be detected at runtime when the app starts
+            _logger.LogInformation("LocalApiBaseUrl not specified, will auto-detect from application");
+        }
+        else
         {
             _httpClient.BaseAddress = new Uri(_options.LocalApiBaseUrl);
         }
@@ -44,6 +55,26 @@ public class AmqpClientConsumer : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Starting AMQP Client Consumer");
+
+        // Auto-detect LocalApiBaseUrl if not specified
+        if (string.IsNullOrEmpty(_options.LocalApiBaseUrl) && _server != null)
+        {
+            // Wait a bit for the server to start
+            await Task.Delay(1000, stoppingToken);
+            
+            var addresses = _server.Features.Get<IServerAddressesFeature>();
+            if (addresses?.Addresses != null && addresses.Addresses.Count > 0)
+            {
+                var address = addresses.Addresses.First();
+                _httpClient.BaseAddress = new Uri(address);
+                _logger.LogInformation("Auto-detected LocalApiBaseUrl: {Address}", address);
+            }
+            else
+            {
+                _logger.LogWarning("Could not auto-detect LocalApiBaseUrl. Using default: http://localhost:5000");
+                _httpClient.BaseAddress = new Uri("http://localhost:5000");
+            }
+        }
 
         // Initialize RabbitMQ connection
         var factory = new ConnectionFactory

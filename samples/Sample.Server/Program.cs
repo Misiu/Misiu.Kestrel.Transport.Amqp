@@ -2,22 +2,22 @@ using Misiu.Kestrel.Transport.Amqp;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure AMQP Gateway
-builder.Services.AddAmqpGateway(options =>
-{
-    options.HostName = "localhost";
-    options.Port = 5672;
-    options.UserName = "guest";
-    options.Password = "guest";
-    options.RequestQueue = "amqp.gateway.requests";
-    options.ResponseQueue = "amqp.gateway.responses";
-    options.ImmediateTimeoutSeconds = 3;
-    options.ResultTtlMinutes = 15;
-    
-    // Path transformation (server-side configuration)
-    // Example: /proxy/name → /name (removes /proxy prefix)
-    // options.PathPrefixToRemove = "/proxy";
-});
+// Configure AMQP Gateway - using appsettings.json
+builder.Services.AddAmqpGateway(builder.Configuration);
+
+// Alternative: Configure programmatically
+// builder.Services.AddAmqpGateway(options =>
+// {
+//     options.HostName = "localhost";
+//     options.Port = 5672;
+//     options.UserName = "guest";
+//     options.Password = "guest";
+//     options.RequestQueue = "amqp.gateway.requests";
+//     options.ResponseQueue = "amqp.gateway.responses";
+//     options.ImmediateTimeoutSeconds = 3;
+//     options.ResultTtlMinutes = 15;
+//     options.PathPrefixToRemove = "/proxy";
+// });
 
 var app = builder.Build();
 

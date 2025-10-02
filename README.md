@@ -52,38 +52,34 @@ dotnet add package Misiu.Kestrel.Transport.Amqp
 
 Deploy this on a publicly accessible server:
 
+**Simple configuration with appsettings.json:**
+
 ```csharp
 using Misiu.Kestrel.Transport.Amqp;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddAmqpGateway(builder.Configuration);
 
-// Configure AMQP Gateway
+var app = builder.Build();
+app.MapAmqpResultEndpoint();
+app.UseAmqpGateway();
+app.Run();
+```
+
+**Or configure programmatically:**
+
+```csharp
 builder.Services.AddAmqpGateway(options =>
 {
     options.HostName = "your-rabbitmq-server.com";
     options.Port = 5672;
-    options.UserName = "guest";
-    options.Password = "guest";
     options.RequestQueue = "amqp.gateway.requests";
     options.ResponseQueue = "amqp.gateway.responses";
-    options.ImmediateTimeoutSeconds = 3;
-    options.ResultTtlMinutes = 15;
-    
-    // Path transformation (removes prefix before forwarding to client)
-    // Example: /proxy/name → /name
-    options.PathPrefixToRemove = "/proxy";
+    options.PathPrefixToRemove = "/proxy"; // Optional path transformation
 });
-
-var app = builder.Build();
-
-// Map endpoint to retrieve delayed results
-app.MapAmqpResultEndpoint();
-
-// Forward all requests to AMQP
-app.UseAmqpGateway();
-
-app.Run();
 ```
+
+See [CONFIGURATION.md](CONFIGURATION.md) for all configuration options.
 
 ### Client (Behind Firewall)
 
@@ -91,31 +87,29 @@ app.Run();
 
 #### Approach 1: BackgroundService (Recommended for most use cases)
 
-Simple forwarding to any existing HTTP API:
+**Using appsettings.json (recommended):**
 
 ```csharp
 using Misiu.Kestrel.Transport.Amqp;
 
 var builder = Host.CreateApplicationBuilder(args);
+builder.Services.AddAmqpClient(builder.Configuration);
+await builder.Build().RunAsync();
+```
 
-// Configure AMQP Client
+**Or configure programmatically:**
+
+```csharp
 builder.Services.AddAmqpClient(options =>
 {
     options.HostName = "your-rabbitmq-server.com";
-    options.Port = 5672;
-    options.UserName = "guest";
-    options.Password = "guest";
     options.RequestQueue = "amqp.gateway.requests";
     options.ResponseQueue = "amqp.gateway.responses";
-    options.LocalApiBaseUrl = "http://localhost:5000"; // Your local API
-    options.PrefetchCount = 10;
-    
-    // Path transformation is configured on the SERVER (gateway) side
+    // LocalApiBaseUrl auto-detects if not specified
 });
-
-var host = builder.Build();
-await host.RunAsync();
 ```
+
+💡 **Tip:** Run with `dotnet run --urls=http://localhost:8080` - LocalApiBaseUrl will auto-detect!
 
 #### Approach 2: Custom Kestrel Transport (Best performance)
 

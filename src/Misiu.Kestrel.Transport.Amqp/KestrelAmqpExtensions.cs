@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
@@ -35,6 +36,32 @@ public static class KestrelAmqpExtensions
         {
             services.AddOptions<AmqpTransportOptions>(name);
         }
+
+        // Ensure factory is present (coexists with other transports)
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IConnectionListenerFactory, AmqpConnectionListenerFactory>());
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the AmqpConnectionListenerFactory in DI using configuration
+    /// </summary>
+    /// <param name="services">The service collection</param>
+    /// <param name="configuration">The configuration section</param>
+    /// <param name="sectionName">The configuration section name (default: "AmqpTransport")</param>
+    /// <param name="optionsName">The options name</param>
+    /// <returns>The service collection for chaining</returns>
+    public static IServiceCollection AddAmqpTransport(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        string sectionName = "AmqpTransport",
+        string? optionsName = null)
+    {
+        var name = optionsName ?? Options.DefaultName;
+        services.AddOptions<AmqpTransportOptions>(name)
+            .Bind(configuration.GetSection(sectionName))
+            .ValidateOnStart();
 
         // Ensure factory is present (coexists with other transports)
         services.TryAddEnumerable(

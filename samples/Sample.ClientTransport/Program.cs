@@ -6,16 +6,19 @@ Console.WriteLine();
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure AMQP Transport - server listens on AMQP queue
-builder.Services.AddAmqpTransport(options =>
-{
-    options.HostName = "localhost";
-    options.Port = 5672;
-    options.UserName = "guest";
-    options.Password = "guest";
-    options.RequestQueue = "amqp.gateway.requests";
-    options.ResponseQueue = "amqp.gateway.responses";
-});
+// Configure AMQP Transport - using appsettings.json
+builder.Services.AddAmqpTransport(builder.Configuration);
+
+// Alternative: Configure programmatically
+// builder.Services.AddAmqpTransport(options =>
+// {
+//     options.HostName = "localhost";
+//     options.Port = 5672;
+//     options.UserName = "guest";
+//     options.Password = "guest";
+//     options.RequestQueue = "amqp.gateway.requests";
+//     options.ResponseQueue = "amqp.gateway.responses";
+// });
 
 // Configure Kestrel to use AMQP transport (in addition to or instead of HTTP)
 builder.WebHost.ConfigureKestrel(kestrel =>

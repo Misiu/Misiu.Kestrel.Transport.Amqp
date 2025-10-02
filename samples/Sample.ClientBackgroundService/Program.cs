@@ -9,21 +9,21 @@ Console.WriteLine();
 
 var builder = Host.CreateApplicationBuilder(args);
 
-// Configure AMQP Client to consume requests and forward to local API
-builder.Services.AddAmqpClient(options =>
-{
-    options.HostName = "localhost";
-    options.Port = 5672;
-    options.UserName = "guest";
-    options.Password = "guest";
-    options.RequestQueue = "amqp.gateway.requests";
-    options.ResponseQueue = "amqp.gateway.responses";
-    options.LocalApiBaseUrl = "http://localhost:5001"; // Your actual local API
-    options.PrefetchCount = 10;
-    
-    // Path transformation is configured on the SERVER side (gateway)
-    // The client receives already-transformed paths
-});
+// Configure AMQP Client - using appsettings.json
+builder.Services.AddAmqpClient(builder.Configuration);
+
+// Alternative: Configure programmatically
+// builder.Services.AddAmqpClient(options =>
+// {
+//     options.HostName = "localhost";
+//     options.Port = 5672;
+//     options.UserName = "guest";
+//     options.Password = "guest";
+//     options.RequestQueue = "amqp.gateway.requests";
+//     options.ResponseQueue = "amqp.gateway.responses";
+//     options.LocalApiBaseUrl = "http://localhost:5001"; // Or leave empty for auto-detection
+//     options.PrefetchCount = 10;
+// });
 
 // Configure logging
 builder.Logging.ClearProviders();
