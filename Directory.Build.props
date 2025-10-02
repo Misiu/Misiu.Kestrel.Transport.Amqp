@@ -1,0 +1,32 @@
+<Project>
+    <!-- Set the repository root into a variable -->
+    <PropertyGroup>
+        <SourceRoot>$(MSBuildThisFileDirectory)</SourceRoot>
+    </PropertyGroup>
+
+    <!-- Set common properties regarding assembly information and nuget packages -->
+    <PropertyGroup>
+        <Authors>Misiu</Authors>
+        <Owners>Misiu</Owners>
+        <Title>Misiu.Kestrel.Transport.Amqp - AMQP Transport for Kestrel</Title>
+        <Description>AMQP Transport for Kestrel server</Description>
+        <Copyright>Copyright © Misiu</Copyright>
+        <RepositoryUrl>https://github.com/Misiu/Misiu.Kestrel.Transport.Amqp</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageProjectUrl>https://github.com/Misiu/Misiu.Kestrel.Transport.Amqp</PackageProjectUrl>
+        <PackageTags>AMQP Kestrel Transport C# .NET</PackageTags>
+    </PropertyGroup>
+
+    <!-- Common compile parameters -->
+    <PropertyGroup>
+        <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+        <LangVersion>latest</LangVersion>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+    </PropertyGroup>
+</Project>
