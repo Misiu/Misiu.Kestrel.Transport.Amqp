@@ -198,8 +198,15 @@ public class TransportApproachTests
             var resultResponse = await httpClient.GetAsync(location);
             Assert.Equal(HttpStatusCode.OK, resultResponse.StatusCode);
             
-            var resultJson = await resultResponse.Content.ReadFromJsonAsync<JsonElement>();
-            Assert.Equal(200, resultJson.GetProperty("statusCode").GetInt32());
+            // Verify custom headers are present
+            Assert.True(resultResponse.Headers.Contains("X-Processing-Time-Ms"));
+            Assert.True(resultResponse.Headers.Contains("X-Server-Started-At-Utc"));
+            Assert.True(resultResponse.Headers.Contains("X-Server-Completed-At-Utc"));
+            
+            // Verify we get the actual response body, not JSON wrapper
+            var resultBody = await resultResponse.Content.ReadAsStringAsync();
+            var resultJson = JsonSerializer.Deserialize<JsonElement>(resultBody);
+            Assert.Equal("Slow operation completed", resultJson.GetProperty("message").GetString());
         }
         finally
         {

@@ -66,21 +66,32 @@ public static class AmqpGatewayExtensions
     /// <returns>The endpoint route builder for chaining</returns>
     public static IEndpointRouteBuilder MapAmqpResultEndpoint(this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapGet("/amqp/result/{correlationId:guid}", (Guid correlationId, IMemoryCache cache) =>
+        endpoints.MapGet("/amqp/result/{correlationId:guid}", (Guid correlationId, IMemoryCache cache, HttpContext context) =>
         {
             var cacheKey = $"amqp:result:{correlationId:N}";
             if (cache.TryGetValue<HttpResponseEnvelope>(cacheKey, out var envelope) && envelope != null)
             {
-                return Results.Json(new
+                // Set status code
+                context.Response.StatusCode = envelope.StatusCode;
+                
+                // Add custom headers for processing metadata
+                context.Response.Headers["X-Processing-Time-Ms"] = envelope.ProcessingMilliseconds.ToString();
+                context.Response.Headers["X-Server-Started-At-Utc"] = envelope.ServerStartedAtUtc.ToString("O");
+                context.Response.Headers["X-Server-Completed-At-Utc"] = envelope.ServerCompletedAtUtc.ToString("O");
+                
+                // Add original headers
+                foreach (var header in envelope.Headers)
                 {
-                    correlationId = envelope.CorrelationId,
-                    statusCode = envelope.StatusCode,
-                    processingMs = envelope.ProcessingMilliseconds,
-                    serverStartedAt = envelope.ServerStartedAtUtc,
-                    serverCompletedAt = envelope.ServerCompletedAtUtc,
-                    body = envelope.Body != null ? System.Text.Encoding.UTF8.GetString(envelope.Body) : null,
-                    headers = envelope.Headers
-                });
+                    context.Response.Headers[header.Key] = header.Value;
+                }
+                
+                // Write body if present
+                if (envelope.Body != null && envelope.Body.Length > 0)
+                {
+                    return Results.Bytes(envelope.Body, envelope.ContentType);
+                }
+                
+                return Results.Empty;
             }
 
             return Results.NotFound(new
