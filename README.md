@@ -41,7 +41,3 @@ builder.Services.Configure<AmqpTransportOptions>(options =>
 var app = builder.Build();
 app.Run();
 ```
-
-## License
-
-MIT
