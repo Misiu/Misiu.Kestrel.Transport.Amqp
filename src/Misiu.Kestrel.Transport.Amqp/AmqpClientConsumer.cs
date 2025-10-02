@@ -20,6 +20,8 @@ public class AmqpClientConsumer : BackgroundService
     private readonly AmqpTransportOptions _options;
     private readonly HttpClient _httpClient;
     private readonly IServer? _server;
+    private readonly IHostApplicationLifetime? _lifetime;
+    private readonly TaskCompletionSource<bool> _serverStarted = new();
     private IConnection? _connection;
     private IModel? _channel;
 
@@ -30,22 +32,34 @@ public class AmqpClientConsumer : BackgroundService
         ILogger<AmqpClientConsumer> logger,
         IOptions<AmqpTransportOptions> options,
         IHttpClientFactory httpClientFactory,
-        IServer? server = null)
+        IServer? server = null,
+        IHostApplicationLifetime? lifetime = null)
     {
         _logger = logger;
         _options = options.Value;
         _httpClient = httpClientFactory.CreateClient("AmqpClient");
         _server = server;
+        _lifetime = lifetime;
         
         // Auto-detect local API URL if not specified
         if (string.IsNullOrEmpty(_options.LocalApiBaseUrl))
         {
             // Will be detected at runtime when the app starts
             _logger.LogInformation("LocalApiBaseUrl not specified, will auto-detect from application");
+            
+            // Register callback to set TaskCompletionSource when server starts
+            if (_lifetime != null)
+            {
+                _lifetime.ApplicationStarted.Register(() =>
+                {
+                    _serverStarted.TrySetResult(true);
+                });
+            }
         }
         else
         {
             _httpClient.BaseAddress = new Uri(_options.LocalApiBaseUrl);
+            _serverStarted.TrySetResult(true); // No need to wait if URL is specified
         }
     }
 
@@ -59,8 +73,18 @@ public class AmqpClientConsumer : BackgroundService
         // Auto-detect LocalApiBaseUrl if not specified
         if (string.IsNullOrEmpty(_options.LocalApiBaseUrl) && _server != null)
         {
-            // Wait a bit for the server to start
-            await Task.Delay(1000, stoppingToken);
+            _logger.LogInformation("Waiting for server to start...");
+            
+            // Wait for server to start (using TaskCompletionSource instead of fixed delay)
+            try
+            {
+                await _serverStarted.Task.WaitAsync(TimeSpan.FromSeconds(10), stoppingToken);
+                _logger.LogInformation("Server started, detecting addresses...");
+            }
+            catch (TimeoutException)
+            {
+                _logger.LogWarning("Timeout waiting for server to start. Proceeding with address detection...");
+            }
             
             var addresses = _server.Features.Get<IServerAddressesFeature>();
             if (addresses?.Addresses != null && addresses.Addresses.Count > 0)

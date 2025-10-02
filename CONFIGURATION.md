@@ -248,9 +248,16 @@ The BackgroundService approach can automatically detect the application's listen
 
 **When LocalApiBaseUrl is not specified:**
 1. The application starts and begins listening on configured ports
-2. The BackgroundService waits 1 second for the server to start
-3. It reads the server's listening addresses
-4. It uses the first available address as the base URL
+2. The BackgroundService registers a callback with `IHostApplicationLifetime.ApplicationStarted`
+3. When the server starts, the callback is triggered immediately
+4. The BackgroundService reads the server's listening addresses from `IServerAddressesFeature`
+5. It uses the first available address as the base URL
+
+**Implementation Details:**
+- Uses `TaskCompletionSource` for efficient waiting (no polling, no fixed delay)
+- Triggered instantly when server starts (optimal responsiveness)
+- 10-second timeout as safety fallback (in case server doesn't start)
+- Falls back to `http://localhost:5000` if detection fails
 
 **Example:**
 
@@ -258,7 +265,7 @@ The BackgroundService approach can automatically detect the application's listen
 # Run your API on port 8080
 dotnet run --urls=http://localhost:8080
 
-# The BackgroundService will auto-detect http://localhost:8080
+# The BackgroundService will instantly detect http://localhost:8080 when server starts
 ```
 
 This is particularly useful when:
@@ -272,6 +279,8 @@ This is particularly useful when:
 - No need to update configuration files
 - Flexible deployment scenarios
 - Works with `--urls` command-line argument
+- Instant detection (no arbitrary delays)
+- Event-driven approach (optimal performance)
 
 ## All Configuration Options
 
