@@ -59,10 +59,17 @@ Creates test server instances:
 
 ## Running the Tests
 
+### Run smoke tests (recommended for CI)
+```bash
+dotnet test --filter "FullyQualifiedName~BasicSmokeTests"
+```
+
 ### Run all tests
 ```bash
 dotnet test
 ```
+
+**Note**: The full integration tests can take 30-60 seconds to run and may have timing issues in resource-constrained environments. The smoke tests verify the core infrastructure works.
 
 ### Run Transport approach tests only
 ```bash

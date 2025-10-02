@@ -45,7 +45,7 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
             _localApiBaseUrl);
 
         await _clientHost.StartAsync();
-        await Task.Delay(2000); // Wait for client to connect to RabbitMQ
+        await Task.Delay(1000); // Wait for client to connect to RabbitMQ
 
         // Create and start the gateway server
         _gatewayServer = TestServerFactory.CreateGatewayServer(
@@ -62,7 +62,7 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
 
         _httpClient = new HttpClient { BaseAddress = new Uri(_gatewayBaseUrl) };
         
-        await Task.Delay(1000); // Wait for gateway to connect to RabbitMQ
+        await Task.Delay(500); // Wait for gateway to connect to RabbitMQ
     }
 
     public async Task DisposeAsync()
