@@ -72,8 +72,8 @@ public sealed class AmqpConnectionContext : ConnectionContext
             Transport.Output.Complete();
             
             // Drain full raw HTTP response written by Kestrel into the output reader
-            // Use a timeout to prevent hanging if the pipe is never completed
-            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            // Use a shorter timeout (2s) to avoid blocking subsequent tests
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             using var ms = new MemoryStream();
             
             var drainTask = Task.Run(async () =>
