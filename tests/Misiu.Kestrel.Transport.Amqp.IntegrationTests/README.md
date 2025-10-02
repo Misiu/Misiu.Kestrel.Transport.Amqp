@@ -61,15 +61,25 @@ Creates test server instances:
 
 ### Run smoke tests (recommended for CI)
 ```bash
+dotnet test --filter "Category=Smoke"
+```
+
+Or by class name:
+```bash
 dotnet test --filter "FullyQualifiedName~BasicSmokeTests"
 ```
 
-### Run all tests
+### Run all integration tests (requires Docker)
+```bash
+dotnet test --filter "Category=Integration"
+```
+
+### Run all tests (smoke + integration)
 ```bash
 dotnet test
 ```
 
-**Note**: The full integration tests can take 30-60 seconds to run and may have timing issues in resource-constrained environments. The smoke tests verify the core infrastructure works.
+**Note**: The full integration tests can take 30-60 seconds to run and may have timing issues in resource-constrained environments. The smoke tests verify the core infrastructure works and complete in ~7 seconds.
 
 ### Run Transport approach tests only
 ```bash
@@ -84,6 +94,23 @@ dotnet test --filter "FullyQualifiedName~BackgroundServiceApproachTests"
 ### Run a specific test
 ```bash
 dotnet test --filter "FullyQualifiedName~Test_Request_Response_Immediate"
+```
+
+### CI/CD Integration
+
+For CI/CD pipelines, it's recommended to run only smoke tests to get fast feedback:
+
+```yaml
+# GitHub Actions example
+- name: Run Smoke Tests
+  run: dotnet test --filter "Category=Smoke" --logger "trx;LogFileName=test-results.trx"
+```
+
+To run full integration tests (which require Docker and take longer):
+```yaml
+- name: Run Integration Tests
+  run: dotnet test --filter "Category=Integration" --logger "trx;LogFileName=test-results.trx"
+  timeout-minutes: 10
 ```
 
 ## Test Execution Time

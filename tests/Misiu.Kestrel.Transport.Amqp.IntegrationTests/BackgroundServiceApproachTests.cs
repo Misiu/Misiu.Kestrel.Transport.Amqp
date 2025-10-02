@@ -10,8 +10,11 @@ namespace Misiu.Kestrel.Transport.Amqp.IntegrationTests;
 
 /// <summary>
 /// Integration tests for BackgroundService approach (HTTP forwarding)
+/// These tests require Docker and may take longer to run.
 /// </summary>
 [Collection("RabbitMQ")]
+[Trait("Category", "Integration")]
+[Trait("RequiresDocker", "true")]
 public class BackgroundServiceApproachTests : IAsyncLifetime
 {
     private readonly RabbitMqFixture _rabbitMq;

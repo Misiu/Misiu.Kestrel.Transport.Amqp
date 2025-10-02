@@ -3,9 +3,12 @@ using Misiu.Kestrel.Transport.Amqp.IntegrationTests.Infrastructure;
 namespace Misiu.Kestrel.Transport.Amqp.IntegrationTests;
 
 /// <summary>
-/// Basic smoke tests to verify test infrastructure works
+/// Basic smoke tests to verify test infrastructure works.
+/// These are fast tests suitable for CI/CD pipelines.
 /// </summary>
 [Collection("RabbitMQ")]
+[Trait("Category", "Smoke")]
+[Trait("RequiresDocker", "true")]
 public class BasicSmokeTests
 {
     private readonly RabbitMqFixture _rabbitMq;

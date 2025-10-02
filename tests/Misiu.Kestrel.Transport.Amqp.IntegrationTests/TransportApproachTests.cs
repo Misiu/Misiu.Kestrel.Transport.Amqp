@@ -10,8 +10,11 @@ namespace Misiu.Kestrel.Transport.Amqp.IntegrationTests;
 
 /// <summary>
 /// Integration tests for Transport approach (AMQP as Kestrel transport)
+/// These tests require Docker and may take longer to run.
 /// </summary>
 [Collection("RabbitMQ")]
+[Trait("Category", "Integration")]
+[Trait("RequiresDocker", "true")]
 public class TransportApproachTests : IAsyncLifetime
 {
     private readonly RabbitMqFixture _rabbitMq;
