@@ -124,29 +124,12 @@ var host = builder.Build();
 await host.RunAsync();
 ```
 
-### Path Transformation
-
-The BackgroundService approach supports path transformation, similar to [UFX.Relay's TunnelPathPrefixTransformer](https://github.com/unifiedfx/UFX.Relay/pull/19):
-
-```csharp
-options.PathPrefixToRemove = "/proxy";
-options.PathPrefixToAdd = "/api/v1";
-
-// Transforms: /proxy/data → /api/v1/data
-// Transforms: /proxy/users → /api/v1/users
-```
-
-This is useful when:
-- Gateway uses a different path structure than your local API
-- You want to proxy only specific routes (e.g., `/proxy/*`)
-- You need to add versioning prefixes
-
 ### When to Use
 - You want **simplicity and maintainability**
 - You're forwarding to an existing API (any technology)
-- You need **path transformation** capabilities
 - You want **easier debugging** and testing
 - Your local API is separate from the consumer application
+- You can forward to the same API (self-referencing) by setting LocalApiBaseUrl to your app's address
 
 ### Sample
 See `samples/Sample.ClientBackgroundService/`
@@ -160,11 +143,74 @@ See `samples/Sample.ClientBackgroundService/`
 | Performance | ⭐⭐⭐⭐⭐ Best | ⭐⭐⭐⭐ Good |
 | Simplicity | ⭐⭐ Complex | ⭐⭐⭐⭐⭐ Very Simple |
 | Flexibility | ⭐⭐ ASP.NET only | ⭐⭐⭐⭐⭐ Any HTTP API |
-| Path Transform | ❌ No | ✅ Yes |
+| Path Transform | ✅ Yes (server-side) | ✅ Yes (server-side) |
 | Debugging | ⭐⭐ Harder | ⭐⭐⭐⭐⭐ Easier |
 | Testing | ⭐⭐⭐ Moderate | ⭐⭐⭐⭐⭐ Easy |
 | HTTP Parsing | Kestrel native | HttpClient |
 | Setup Complexity | ⭐⭐⭐ Moderate | ⭐⭐⭐⭐⭐ Very Easy |
+| Self-Referencing | ❌ No | ✅ Yes |
+
+---
+
+## Path Transformation
+
+**Important**: Path transformation is configured on the **SERVER** (gateway) side, not on the client.
+
+Both approaches support path transformation because the gateway transforms the path before sending to AMQP, and both clients receive the already-transformed path.
+
+### Configuration (Server-side)
+
+```csharp
+// In Sample.Server
+builder.Services.AddAmqpGateway(options =>
+{
+    // Remove prefix from incoming requests
+    options.PathPrefixToRemove = "/proxy";
+    
+    // Optionally add a prefix
+    // options.PathPrefixToAdd = "/api/v1";
+});
+```
+
+### Example Flow
+
+1. **Client sends**: `GET /proxy/name`
+2. **Gateway transforms**: `/proxy/name` → `/name`
+3. **Sent via AMQP**: `GET /name`
+4. **Client receives**: `GET /name`
+5. **Forwards to local API**: `http://localhost:5001/name`
+6. **Local API has endpoint**: `/name` → returns data
+7. **Response flows back**: Data → Client → AMQP → Gateway → Original caller
+
+If the endpoint doesn't exist (e.g., `/proxy/non-existing` → `/non-existing`), the local API returns 404, which propagates back through the chain.
+
+### Self-Referencing with BackgroundService
+
+The BackgroundService approach can forward to itself:
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+
+// Add AMQP client that forwards to this same app
+builder.Services.AddAmqpClient(options =>
+{
+    options.LocalApiBaseUrl = "http://localhost:5000"; // This app's address
+    // ... other options
+});
+
+var app = builder.Build();
+
+// Define API endpoints
+app.MapGet("/name", () => "John Doe");
+app.MapGet("/hello", () => "Hello World");
+
+app.Run("http://localhost:5000");
+```
+
+The app consumes AMQP messages and forwards them to itself via HttpClient. This works because:
+- The AMQP consumer runs in a background thread
+- HttpClient makes a separate HTTP request back to the app
+- The app processes the request through its normal pipeline
 
 ---
 
@@ -178,10 +224,10 @@ See `samples/Sample.ClientBackgroundService/`
 
 ### Choose **BackgroundService** if:
 - You're forwarding to an existing API
-- You need path transformation
 - Simplicity and maintainability are priorities
 - You want easier testing and debugging
 - Your API isn't ASP.NET Core (or you don't want tight coupling)
+- You need self-referencing (API forwarding to itself)
 
 ---
 

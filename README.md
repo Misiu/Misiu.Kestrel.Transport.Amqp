@@ -68,6 +68,10 @@ builder.Services.AddAmqpGateway(options =>
     options.ResponseQueue = "amqp.gateway.responses";
     options.ImmediateTimeoutSeconds = 3;
     options.ResultTtlMinutes = 15;
+    
+    // Path transformation (removes prefix before forwarding to client)
+    // Example: /proxy/name → /name
+    options.PathPrefixToRemove = "/proxy";
 });
 
 var app = builder.Build();
@@ -106,9 +110,7 @@ builder.Services.AddAmqpClient(options =>
     options.LocalApiBaseUrl = "http://localhost:5000"; // Your local API
     options.PrefetchCount = 10;
     
-    // Optional path transformation
-    options.PathPrefixToRemove = "/proxy";
-    options.PathPrefixToAdd = "/api/v1";
+    // Path transformation is configured on the SERVER (gateway) side
 });
 
 var host = builder.Build();

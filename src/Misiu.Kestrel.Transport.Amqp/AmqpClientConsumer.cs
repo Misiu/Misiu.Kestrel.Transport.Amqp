@@ -186,10 +186,8 @@ public class AmqpClientConsumer : BackgroundService
 
     private async Task<HttpResponseMessage> ExecuteRequestAsync(HttpRequestEnvelope request, CancellationToken cancellationToken)
     {
-        // Transform path if needed
-        var transformedPath = TransformPath(request.PathAndQuery);
-        
-        using var httpRequest = new HttpRequestMessage(new HttpMethod(request.Method), transformedPath);
+        // Path is already transformed by the gateway
+        using var httpRequest = new HttpRequestMessage(new HttpMethod(request.Method), request.PathAndQuery);
 
         // Copy headers
         foreach (var header in request.Headers)
@@ -219,49 +217,6 @@ public class AmqpClientConsumer : BackgroundService
         }
 
         return await _httpClient.SendAsync(httpRequest, cancellationToken);
-    }
-
-    private string TransformPath(string pathAndQuery)
-    {
-        var path = pathAndQuery;
-        
-        // Remove prefix if configured
-        if (!string.IsNullOrEmpty(_options.PathPrefixToRemove))
-        {
-            var prefix = _options.PathPrefixToRemove;
-            if (!prefix.StartsWith("/"))
-            {
-                prefix = "/" + prefix;
-            }
-            
-            if (path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                path = path.Substring(prefix.Length);
-                if (!path.StartsWith("/"))
-                {
-                    path = "/" + path;
-                }
-            }
-        }
-        
-        // Add prefix if configured
-        if (!string.IsNullOrEmpty(_options.PathPrefixToAdd))
-        {
-            var prefix = _options.PathPrefixToAdd;
-            if (!prefix.StartsWith("/"))
-            {
-                prefix = "/" + prefix;
-            }
-            
-            if (prefix.EndsWith("/"))
-            {
-                prefix = prefix.TrimEnd('/');
-            }
-            
-            path = prefix + path;
-        }
-        
-        return path;
     }
 
     /// <summary>

@@ -134,11 +134,14 @@ public class AmqpGatewayMiddleware
             headers[header.Key] = header.Value.ToArray()!;
         }
 
+        // Transform path before forwarding
+        var transformedPath = TransformPath(context.Request.Path + context.Request.QueryString);
+
         var envelope = new HttpRequestEnvelope
         {
             CorrelationId = correlationId,
             Method = context.Request.Method,
-            PathAndQuery = context.Request.Path + context.Request.QueryString,
+            PathAndQuery = transformedPath,
             Headers = headers,
             Body = body,
             ContentType = context.Request.ContentType,
@@ -205,5 +208,48 @@ public class AmqpGatewayMiddleware
             context.Response.StatusCode = 500;
             await context.Response.WriteAsync("Internal server error");
         }
+    }
+
+    private string TransformPath(string pathAndQuery)
+    {
+        var path = pathAndQuery;
+        
+        // Remove prefix if configured
+        if (!string.IsNullOrEmpty(_options.PathPrefixToRemove))
+        {
+            var prefix = _options.PathPrefixToRemove;
+            if (!prefix.StartsWith("/"))
+            {
+                prefix = "/" + prefix;
+            }
+            
+            if (path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                path = path.Substring(prefix.Length);
+                if (!path.StartsWith("/"))
+                {
+                    path = "/" + path;
+                }
+            }
+        }
+        
+        // Add prefix if configured
+        if (!string.IsNullOrEmpty(_options.PathPrefixToAdd))
+        {
+            var prefix = _options.PathPrefixToAdd;
+            if (!prefix.StartsWith("/"))
+            {
+                prefix = "/" + prefix;
+            }
+            
+            if (prefix.EndsWith("/"))
+            {
+                prefix = prefix.TrimEnd('/');
+            }
+            
+            path = prefix + path;
+        }
+        
+        return path;
     }
 }

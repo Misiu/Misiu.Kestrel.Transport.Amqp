@@ -13,6 +13,10 @@ builder.Services.AddAmqpGateway(options =>
     options.ResponseQueue = "amqp.gateway.responses";
     options.ImmediateTimeoutSeconds = 3;
     options.ResultTtlMinutes = 15;
+    
+    // Path transformation (server-side configuration)
+    // Example: /proxy/name → /name (removes /proxy prefix)
+    // options.PathPrefixToRemove = "/proxy";
 });
 
 var app = builder.Build();

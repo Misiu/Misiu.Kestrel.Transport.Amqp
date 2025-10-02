@@ -21,9 +21,8 @@ builder.Services.AddAmqpClient(options =>
     options.LocalApiBaseUrl = "http://localhost:5001"; // Your actual local API
     options.PrefetchCount = 10;
     
-    // Optional path transformation
-    // options.PathPrefixToRemove = "/proxy"; // Remove "/proxy" from incoming paths
-    // options.PathPrefixToAdd = "/api/v1";   // Add "/api/v1" to outgoing paths
+    // Path transformation is configured on the SERVER side (gateway)
+    // The client receives already-transformed paths
 });
 
 // Configure logging

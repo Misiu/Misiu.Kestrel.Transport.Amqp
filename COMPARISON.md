@@ -105,10 +105,10 @@ await builder.Build().RunAsync();
 | Scenario | Why |
 |----------|-----|
 | Forwarding to existing API | Works with anything |
-| Need path transformation | Built-in support |
 | Want simpler code | Easier to understand |
 | Forwarding to non-.NET API | Language agnostic |
 | Easier testing needed | Standard HttpClient |
+| Need self-referencing | Can forward to itself |
 
 ---
 
@@ -137,10 +137,13 @@ await builder.Build().RunAsync();
 **A**: Yes, but requires code changes. Start with BackgroundService if unsure - easier to test and debug.
 
 ### Q: Does Transport support path transformation?
-**A**: No, it processes raw HTTP/1.1. Use BackgroundService if you need path transformation.
+**A**: Yes! Path transformation is configured on the SERVER (gateway) side, so both approaches receive already-transformed paths.
 
 ### Q: Can BackgroundService forward to non-.NET APIs?
 **A**: Yes! It works with any HTTP API (Node.js, Python, Java, etc.)
+
+### Q: Can BackgroundService forward to itself (self-referencing)?
+**A**: Yes! Set `LocalApiBaseUrl` to your app's own address. The app can consume AMQP requests and forward them to itself via HttpClient.
 
 ---
 
