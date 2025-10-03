@@ -168,6 +168,40 @@ public class TransportApproachTests
     }
 
     [Fact]
+    public async Task Test_Response_DoesNotContainHopByHopHeaders()
+    {
+        // Arrange
+        var (clientApp, gatewayServer, httpClient) = await SetupTestAsync();
+        
+        try
+        {
+            // Act
+            var response = await httpClient.GetAsync("/api/data");
+
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            
+            // Verify hop-by-hop headers are not present in the response
+            Assert.False(response.Headers.Contains("Transfer-Encoding"), "Transfer-Encoding header should be filtered out");
+            Assert.False(response.Headers.Contains("Connection"), "Connection header should be filtered out");
+            Assert.False(response.Headers.Contains("Keep-Alive"), "Keep-Alive header should be filtered out");
+            Assert.False(response.Headers.Contains("Upgrade"), "Upgrade header should be filtered out");
+            Assert.False(response.Headers.Contains("Proxy-Connection"), "Proxy-Connection header should be filtered out");
+            
+            // Verify body is properly decoded (not chunked)
+            var content = await response.Content.ReadAsStringAsync();
+            Assert.False(content.Contains("\r\n"), "Response body should not contain CRLF from chunked encoding");
+            
+            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("Data from API", json.GetProperty("message").GetString());
+        }
+        finally
+        {
+            await TeardownTestAsync(clientApp, gatewayServer, httpClient);
+        }
+    }
+
+    [Fact]
     public async Task Test_Request_Response_With_202_Delayed()
     {
         // Arrange - Use short timeout so slow request triggers 202
