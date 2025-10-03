@@ -41,13 +41,13 @@ public class AmqpClientConsumer : BackgroundService
         _httpClient = httpClientFactory.CreateClient("AmqpClient");
         _server = server;
         _lifetime = lifetime;
-        
+
         // Auto-detect local API URL if not specified
         if (string.IsNullOrEmpty(_options.LocalApiBaseUrl))
         {
             // Will be detected at runtime when the app starts
             _logger.LogInformation("LocalApiBaseUrl not specified, will auto-detect from application");
-            
+
             // Register callback to set TaskCompletionSource when server starts
             if (_lifetime != null)
             {
@@ -75,7 +75,7 @@ public class AmqpClientConsumer : BackgroundService
         if (string.IsNullOrEmpty(_options.LocalApiBaseUrl) && _server != null)
         {
             _logger.LogInformation("Waiting for server to start...");
-            
+
             // Wait for server to start (using TaskCompletionSource instead of fixed delay)
             try
             {
@@ -86,7 +86,7 @@ public class AmqpClientConsumer : BackgroundService
             {
                 _logger.LogWarning("Timeout waiting for server to start. Proceeding with address detection...");
             }
-            
+
             var addresses = _server.Features.Get<IServerAddressesFeature>();
             if (addresses?.Addresses != null && addresses.Addresses.Count > 0)
             {
@@ -142,7 +142,7 @@ public class AmqpClientConsumer : BackgroundService
                     return;
                 }
 
-                _logger.LogInformation("Processing request {CorrelationId}: {Method} {Path}", 
+                _logger.LogInformation("Processing request {CorrelationId}: {Method} {Path}",
                     correlationId, request.Method, request.PathAndQuery);
 
                 var sw = Stopwatch.StartNew();
@@ -202,15 +202,15 @@ public class AmqpClientConsumer : BackgroundService
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error executing request {CorrelationId}", correlationId);
-                    
+
                     // Send error response
                     var errorEnvelope = new HttpResponseEnvelope
                     {
                         CorrelationId = correlationId,
                         StatusCode = 502,
-                        Headers = new Dictionary<string, string[]> 
-                        { 
-                            ["Content-Type"] = new[] { "application/json" } 
+                        Headers = new Dictionary<string, string[]>
+                        {
+                            ["Content-Type"] = new[] { "application/json" }
                         },
                         Body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { error = ex.Message }, _jsonOptions)),
                         ContentType = "application/json",
@@ -300,31 +300,31 @@ public class AmqpClientConsumer : BackgroundService
             // Close channel first to stop consuming
             if (_channel != null)
             {
-                try 
-                { 
-                    _channel.Close(); 
-                } 
+                try
+                {
+                    _channel.Close();
+                }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Error closing AMQP channel during disposal");
                 }
                 try { _channel.Dispose(); } catch { }
             }
-            
+
             // Then close connection
             if (_connection != null)
             {
-                try 
-                { 
-                    _connection.Close(); 
-                } 
+                try
+                {
+                    _connection.Close();
+                }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Error closing AMQP connection during disposal");
                 }
                 try { _connection.Dispose(); } catch { }
             }
-            
+
             _httpClient?.Dispose();
         }
         finally

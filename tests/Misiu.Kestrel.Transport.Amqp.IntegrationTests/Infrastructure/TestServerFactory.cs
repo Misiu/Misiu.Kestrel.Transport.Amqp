@@ -16,9 +16,9 @@ public static class TestServerFactory
     /// Creates a gateway server for testing
     /// </summary>
     public static WebApplication CreateGatewayServer(
-        string hostName, 
-        int port, 
-        string userName, 
+        string hostName,
+        int port,
+        string userName,
         string password,
         int immediateTimeoutSeconds = 3,
         string? pathPrefixToRemove = null,
@@ -26,9 +26,9 @@ public static class TestServerFactory
         string? responseQueue = null)
     {
         var builder = WebApplication.CreateBuilder();
-        
+
         builder.WebHost.UseUrls("http://127.0.0.1:0"); // Random port
-        
+
         builder.Services.AddAmqpGateway(options =>
         {
             options.HostName = hostName;
@@ -100,9 +100,9 @@ public static class TestServerFactory
     public static WebApplication CreateLocalApi()
     {
         var builder = WebApplication.CreateBuilder();
-        
+
         builder.WebHost.UseUrls("http://127.0.0.1:0"); // Random port
-        
+
         builder.Logging.ClearProviders();
         builder.Logging.AddConsole();
         builder.Logging.SetMinimumLevel(LogLevel.Information);

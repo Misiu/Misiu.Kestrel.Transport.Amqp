@@ -73,7 +73,7 @@ public static class AmqpGatewayExtensions
             {
                 // Set status code
                 context.Response.StatusCode = envelope.StatusCode;
-                
+
                 // Add custom headers for processing metadata
                 context.Response.Headers["X-Processing-Time-Ms"] = envelope.ProcessingMilliseconds.ToString();
                 context.Response.Headers["X-Server-Started-At-Utc"] = envelope.ServerStartedAtUtc.ToString("O");
@@ -88,7 +88,7 @@ public static class AmqpGatewayExtensions
                         context.Response.Headers[header.Key] = header.Value;
                     }
                 }
-                
+
                 // Write body if present
                 if (envelope.Body != null && envelope.Body.Length > 0)
                 {

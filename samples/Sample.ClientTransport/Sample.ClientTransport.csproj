@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
@@ -6,6 +6,10 @@
 
     <ItemGroup>
         <ProjectReference Include="..\..\src\Misiu.Kestrel.Transport.Amqp\Misiu.Kestrel.Transport.Amqp.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
     </ItemGroup>
 
 </Project>

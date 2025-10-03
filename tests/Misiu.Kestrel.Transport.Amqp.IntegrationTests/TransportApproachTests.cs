@@ -31,7 +31,7 @@ public class TransportApproachTests
         var testId = Guid.NewGuid().ToString().Substring(0, 8);
         var requestQueue = $"amqp.gateway.requests.{testId}";
         var responseQueue = $"amqp.gateway.responses.{testId}";
-        
+
         // Create and start the client app (using Transport approach)  
         var clientApp = TestServerFactory.CreateTransportClient(
             _rabbitMq.HostName,
@@ -55,25 +55,25 @@ public class TransportApproachTests
             responseQueue: responseQueue);
 
         await gatewayServer.StartAsync();
-        
+
         // Get the actual URL the gateway is listening on
         var addresses = gatewayServer.Urls.ToList();
         var gatewayBaseUrl = addresses.First();
 
         var httpClient = new HttpClient { BaseAddress = new Uri(gatewayBaseUrl) };
-        
+
         await Task.Delay(1000); // Wait for gateway to connect to RabbitMQ
-        
+
         return (clientApp, gatewayServer, httpClient);
     }
 
     private async Task TeardownTestAsync(WebApplication? clientApp, WebApplication? gatewayServer, HttpClient? httpClient)
     {
         httpClient?.Dispose();
-        
+
         // Wait a bit to ensure any in-flight requests are fully processed
         await Task.Delay(500);
-        
+
         if (gatewayServer != null)
         {
             await gatewayServer.StopAsync();
@@ -85,7 +85,7 @@ public class TransportApproachTests
             await clientApp.StopAsync();
             await clientApp.DisposeAsync();
         }
-        
+
         // Wait to ensure RabbitMQ consumer is fully cancelled and connections are closed
         // Using unique queue names per test, so no need to purge
         await Task.Delay(500);
@@ -96,7 +96,7 @@ public class TransportApproachTests
     {
         // Arrange
         var (clientApp, gatewayServer, httpClient) = await SetupTestAsync();
-        
+
         try
         {
             // Act - Make a simple request to verify connectivity
@@ -105,7 +105,7 @@ public class TransportApproachTests
             // Assert
             Assert.NotNull(response);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            
+
             var content = await response.Content.ReadAsStringAsync();
             Assert.Contains("Hello from client!", content);
         }
@@ -120,7 +120,7 @@ public class TransportApproachTests
     {
         // Arrange
         var (clientApp, gatewayServer, httpClient) = await SetupTestAsync();
-        
+
         try
         {
             // First verify connection works
@@ -133,7 +133,7 @@ public class TransportApproachTests
             // Assert - Should reconnect and work after restart
             var response2 = await httpClient.GetAsync("/api/data");
             Assert.Equal(HttpStatusCode.OK, response2.StatusCode);
-            
+
             var json = await response2.Content.ReadFromJsonAsync<JsonElement>();
             Assert.Equal("Data from API", json.GetProperty("message").GetString());
         }
@@ -148,7 +148,7 @@ public class TransportApproachTests
     {
         // Arrange
         var (clientApp, gatewayServer, httpClient) = await SetupTestAsync();
-        
+
         try
         {
             // Act
@@ -156,7 +156,7 @@ public class TransportApproachTests
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            
+
             var json = await response.Content.ReadFromJsonAsync<JsonElement>();
             Assert.Equal("Data from API", json.GetProperty("message").GetString());
             Assert.True(json.TryGetProperty("timestamp", out _));
@@ -206,7 +206,7 @@ public class TransportApproachTests
     {
         // Arrange - Use short timeout so slow request triggers 202
         var (clientApp, gatewayServer, httpClient) = await SetupTestAsync(timeoutSeconds: 3);
-        
+
         try
         {
             // Act - Make a request that takes longer than the timeout
@@ -214,13 +214,13 @@ public class TransportApproachTests
 
             // Assert - Should get 202 Accepted
             Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
-        
+
             var json = await response.Content.ReadFromJsonAsync<JsonElement>();
             Assert.Equal("accepted", json.GetProperty("status").GetString());
-            
+
             var correlationId = json.GetProperty("correlationId").GetString();
             Assert.NotNull(correlationId);
-            
+
             var location = json.GetProperty("location").GetString();
             Assert.NotNull(location);
             Assert.Contains(correlationId, location);
@@ -231,12 +231,12 @@ public class TransportApproachTests
             // Retrieve the result
             var resultResponse = await httpClient.GetAsync(location);
             Assert.Equal(HttpStatusCode.OK, resultResponse.StatusCode);
-            
+
             // Verify custom headers are present
             Assert.True(resultResponse.Headers.Contains("X-Processing-Time-Ms"));
             Assert.True(resultResponse.Headers.Contains("X-Server-Started-At-Utc"));
             Assert.True(resultResponse.Headers.Contains("X-Server-Completed-At-Utc"));
-            
+
             // Verify we get the actual response body, not JSON wrapper
             var resultBody = await resultResponse.Content.ReadAsStringAsync();
             var resultJson = JsonSerializer.Deserialize<JsonElement>(resultBody);
@@ -253,7 +253,7 @@ public class TransportApproachTests
     {
         // Arrange
         var (clientApp, gatewayServer, httpClient) = await SetupTestAsync();
-        
+
         try
         {
             // Act
@@ -273,7 +273,7 @@ public class TransportApproachTests
     {
         // Arrange
         var (clientApp, gatewayServer, httpClient) = await SetupTestAsync();
-        
+
         try
         {
             // Act
@@ -293,7 +293,7 @@ public class TransportApproachTests
     {
         // Arrange
         var (clientApp, gatewayServer, httpClient) = await SetupTestAsync();
-        
+
         try
         {
             var request = new HttpRequestMessage(HttpMethod.Get, "/api/headers");
@@ -304,13 +304,13 @@ public class TransportApproachTests
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            
+
             var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-            
+
             // Verify the custom header was passed through
             var customHeader = json.GetProperty("customHeader").GetString();
             Assert.Equal("test-value", customHeader);
-            
+
             // Verify Content-Type header is present in response
             Assert.NotNull(response.Content.Headers.ContentType);
             Assert.Equal("application/json", response.Content.Headers.ContentType.MediaType);
@@ -326,7 +326,7 @@ public class TransportApproachTests
     {
         // Arrange
         var (clientApp, gatewayServer, httpClient) = await SetupTestAsync();
-        
+
         try
         {
             var requestBody = new { name = "Test", value = 42 };
@@ -340,11 +340,11 @@ public class TransportApproachTests
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            
+
             var json = await response.Content.ReadFromJsonAsync<JsonElement>();
             Assert.Equal("POST", json.GetProperty("method").GetString());
             Assert.Equal("/api/echo", json.GetProperty("path").GetString());
-            
+
             var receivedBody = json.GetProperty("receivedBody").GetString();
             Assert.Contains("Test", receivedBody);
             Assert.Contains("42", receivedBody);
@@ -360,7 +360,7 @@ public class TransportApproachTests
     {
         // Arrange
         var (clientApp, gatewayServer, httpClient) = await SetupTestAsync();
-        
+
         try
         {
             var tasks = new List<Task<HttpResponseMessage>>();
@@ -390,12 +390,12 @@ public class TransportApproachTests
     {
         // Arrange
         var (clientApp, gatewayServer, httpClient) = await SetupTestAsync();
-        
+
         try
         {
             // Send two requests: one slower (1 second), one fast (immediate)
             // The fast one should complete first but should be matched to the correct request
-            
+
             // Act - Send slower request first (takes 1 second)
             var slowerTask = Task.Run(async () =>
             {
