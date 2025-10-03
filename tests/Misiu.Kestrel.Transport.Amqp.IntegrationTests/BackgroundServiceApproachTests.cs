@@ -2,9 +2,9 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
-using Misiu.Kestrel.Transport.Amqp.IntegrationTests.Infrastructure;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Hosting;
+using Misiu.Kestrel.Transport.Amqp.IntegrationTests.Infrastructure;
 
 namespace Misiu.Kestrel.Transport.Amqp.IntegrationTests;
 
@@ -191,18 +191,18 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        
+
         // Verify hop-by-hop headers are not present in the response
         Assert.False(response.Headers.Contains("Transfer-Encoding"), "Transfer-Encoding header should be filtered out");
         Assert.False(response.Headers.Contains("Connection"), "Connection header should be filtered out");
         Assert.False(response.Headers.Contains("Keep-Alive"), "Keep-Alive header should be filtered out");
         Assert.False(response.Headers.Contains("Upgrade"), "Upgrade header should be filtered out");
         Assert.False(response.Headers.Contains("Proxy-Connection"), "Proxy-Connection header should be filtered out");
-        
+
         // Verify body is properly decoded (not chunked)
         var content = await response.Content.ReadAsStringAsync();
         Assert.False(content.Contains("\r\n"), "Response body should not contain CRLF from chunked encoding");
-        
+
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("Data from API", json.GetProperty("message").GetString());
     }

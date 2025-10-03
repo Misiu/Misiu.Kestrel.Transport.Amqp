@@ -328,7 +328,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
             var headers = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
             int bodyStartIndex = 0;
             bool isChunked = false;
-            
+
             for (int i = 1; i < lines.Length; i++)
             {
                 if (string.IsNullOrEmpty(lines[i]))
@@ -342,14 +342,14 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
                 {
                     var headerName = lines[i].Substring(0, colonIndex).Trim();
                     var headerValue = lines[i].Substring(colonIndex + 1).Trim();
-                    
+
                     // Detect chunked transfer encoding
                     if (headerName.Equals("Transfer-Encoding", StringComparison.OrdinalIgnoreCase) &&
                         headerValue.Contains("chunked", StringComparison.OrdinalIgnoreCase))
                     {
                         isChunked = true;
                     }
-                    
+
                     if (headers.ContainsKey(headerName))
                     {
                         var existing = headers[headerName];
@@ -364,14 +364,14 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
                     }
                 }
             }
-            
+
             // Filter out hop-by-hop headers (these are invalid for HTTP/2 and HTTP/3)
             var hopByHopHeaders = new[] { "Connection", "Keep-Alive", "Transfer-Encoding", "Upgrade", "Proxy-Connection" };
             foreach (var hopHeader in hopByHopHeaders)
             {
                 headers.Remove(hopHeader);
             }
-            
+
             // Extract and decode body
             byte[]? body = null;
             if (bodyStartIndex < lines.Length)
@@ -401,12 +401,12 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
                 ProcessingMilliseconds = 0 // Not tracked in Transport approach
             };
         }
-        
+
         byte[]? DecodeChunkedBody(string[] lines, int startIndex)
         {
             var bodyParts = new List<byte[]>();
             int i = startIndex;
-            
+
             while (i < lines.Length)
             {
                 // Read chunk size line
@@ -416,7 +416,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
                     i++;
                     continue;
                 }
-                
+
                 // Parse chunk size (hex)
                 // Handle chunk extensions (e.g., "1a; name=value")
                 var semicolonIndex = chunkSizeLine.IndexOf(';');
@@ -424,21 +424,21 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
                 {
                     chunkSizeLine = chunkSizeLine.Substring(0, semicolonIndex);
                 }
-                
+
                 if (!int.TryParse(chunkSizeLine, System.Globalization.NumberStyles.HexNumber, null, out var chunkSize))
                 {
                     // Invalid chunk size, stop parsing
                     break;
                 }
-                
+
                 // Chunk size 0 means end of chunks
                 if (chunkSize == 0)
                 {
                     break;
                 }
-                
+
                 i++;
-                
+
                 // Read chunk data
                 if (i < lines.Length)
                 {
@@ -447,12 +447,12 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
                     i++;
                 }
             }
-            
+
             if (bodyParts.Count == 0)
             {
                 return null;
             }
-            
+
             // Combine all chunks
             var totalLength = bodyParts.Sum(p => p.Length);
             var result = new byte[totalLength];
@@ -462,7 +462,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
                 Buffer.BlockCopy(part, 0, result, offset, part.Length);
                 offset += part.Length;
             }
-            
+
             return result;
         }
 

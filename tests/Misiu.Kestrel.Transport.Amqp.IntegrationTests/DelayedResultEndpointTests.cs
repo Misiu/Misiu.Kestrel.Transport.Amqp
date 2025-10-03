@@ -2,12 +2,12 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
-using Misiu.Kestrel.Transport.Amqp.IntegrationTests.Infrastructure;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Misiu.Kestrel.Transport.Amqp.IntegrationTests.Infrastructure;
 
 namespace Misiu.Kestrel.Transport.Amqp.IntegrationTests;
 

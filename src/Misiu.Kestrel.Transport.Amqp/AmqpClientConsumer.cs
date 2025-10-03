@@ -169,7 +169,7 @@ public class AmqpClientConsumer : BackgroundService
 
                     // Copy response headers (excluding hop-by-hop headers)
                     var hopByHopHeaders = new[] { "Connection", "Keep-Alive", "Transfer-Encoding", "Upgrade", "Proxy-Connection" };
-                    
+
                     foreach (var header in response.Headers)
                     {
                         // Skip hop-by-hop headers

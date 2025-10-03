@@ -232,7 +232,7 @@ public class HttpResponseParserTests
         // This is the actual format causing the issue: 82\r\n{json}\r\n0\r\n\r\n
         var jsonBody = "{\"message\":\"Data from local API behind firewall\",\"timestamp\":\"2025-10-02T11:55:15.2083072+00:00\",\"source\":\"AMQP Transport Client\"}";
         var chunkSize = jsonBody.Length.ToString("X"); // 82 in hex = 130 in decimal
-        
+
         var response = "HTTP/1.1 200 OK\r\n" +
                       "Content-Type: application/json; charset=utf-8\r\n" +
                       "Transfer-Encoding: chunked\r\n" +
@@ -250,7 +250,7 @@ public class HttpResponseParserTests
         Assert.NotNull(envelope.Body);
         var bodyText = Encoding.UTF8.GetString(envelope.Body);
         Assert.Equal(jsonBody, bodyText);
-        
+
         // Verify Transfer-Encoding header is NOT in the final headers (hop-by-hop header)
         Assert.DoesNotContain("Transfer-Encoding", envelope.Headers.Keys);
     }
@@ -305,14 +305,14 @@ public class HttpResponseParserTests
 
         // Assert
         Assert.Equal(200, envelope.StatusCode);
-        
+
         // These hop-by-hop headers should be filtered out
         Assert.DoesNotContain("Connection", envelope.Headers.Keys);
         Assert.DoesNotContain("Keep-Alive", envelope.Headers.Keys);
         Assert.DoesNotContain("Transfer-Encoding", envelope.Headers.Keys);
         Assert.DoesNotContain("Upgrade", envelope.Headers.Keys);
         Assert.DoesNotContain("Proxy-Connection", envelope.Headers.Keys);
-        
+
         // But custom headers should remain
         Assert.Contains("Content-Type", envelope.Headers.Keys);
         Assert.Contains("X-Custom-Header", envelope.Headers.Keys);
@@ -359,7 +359,7 @@ public class HttpResponseParserTests
         var headers = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
         int bodyStartIndex = 0;
         bool isChunked = false;
-        
+
         for (int i = 1; i < lines.Length; i++)
         {
             if (string.IsNullOrEmpty(lines[i]))
@@ -430,12 +430,12 @@ public class HttpResponseParserTests
             Body = body
         };
     }
-    
+
     private static byte[]? DecodeChunkedBodyTest(string[] lines, int startIndex)
     {
         var bodyParts = new List<byte[]>();
         int i = startIndex;
-        
+
         while (i < lines.Length)
         {
             // Read chunk size line
@@ -445,7 +445,7 @@ public class HttpResponseParserTests
                 i++;
                 continue;
             }
-            
+
             // Parse chunk size (hex)
             // Handle chunk extensions (e.g., "1a; name=value")
             var semicolonIndex = chunkSizeLine.IndexOf(';');
@@ -453,21 +453,21 @@ public class HttpResponseParserTests
             {
                 chunkSizeLine = chunkSizeLine.Substring(0, semicolonIndex);
             }
-            
+
             if (!int.TryParse(chunkSizeLine, System.Globalization.NumberStyles.HexNumber, null, out var chunkSize))
             {
                 // Invalid chunk size, stop parsing
                 break;
             }
-            
+
             // Chunk size 0 means end of chunks
             if (chunkSize == 0)
             {
                 break;
             }
-            
+
             i++;
-            
+
             // Read chunk data
             if (i < lines.Length)
             {
@@ -476,12 +476,12 @@ public class HttpResponseParserTests
                 i++;
             }
         }
-        
+
         if (bodyParts.Count == 0)
         {
             return null;
         }
-        
+
         // Combine all chunks
         var totalLength = bodyParts.Sum(p => p.Length);
         var result = new byte[totalLength];
@@ -491,7 +491,7 @@ public class HttpResponseParserTests
             Buffer.BlockCopy(part, 0, result, offset, part.Length);
             offset += part.Length;
         }
-        
+
         return result;
     }
 }
