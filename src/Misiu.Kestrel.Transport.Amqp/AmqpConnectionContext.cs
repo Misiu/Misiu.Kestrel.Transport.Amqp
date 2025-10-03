@@ -73,12 +73,12 @@ public sealed class AmqpConnectionContext : ConnectionContext
             // This must be done AFTER Kestrel finishes writing the response
             // Since we're in disposal, Kestrel has finished processing
             Transport.Output.Complete();
-            
+
             // Drain full raw HTTP response written by Kestrel into the output reader
             // Use a 5-second timeout to prevent hanging if pipe isn't completed properly
             using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var ms = new MemoryStream();
-            
+
             var drainTask = Task.Run(async () =>
             {
                 while (true)
@@ -96,7 +96,7 @@ public sealed class AmqpConnectionContext : ConnectionContext
                     }
                 }
             });
-            
+
             await drainTask.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
 
             await _publishResponse(ms.ToArray()).ConfigureAwait(false);
@@ -112,7 +112,7 @@ public sealed class AmqpConnectionContext : ConnectionContext
         catch (OperationCanceledException)
         {
             _logger.LogWarning("Timeout while draining output pipe for {ConnectionId}, publishing error response", _id);
-            
+
             // Publish a 500 error response so gateway doesn't timeout
             try
             {
@@ -123,7 +123,7 @@ public sealed class AmqpConnectionContext : ConnectionContext
             {
                 _logger.LogError(publishEx, "Failed to publish error response for {ConnectionId}", _id);
             }
-            
+
             try
             {
                 _channel.BasicAck(_deliveryTag, multiple: false);

@@ -64,7 +64,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
         var connectionName = $"AmqpTransport-{_endpoint.Name}-{Guid.NewGuid().ToString().Substring(0, 8)}";
         _conn = factory.CreateConnection(connectionName);
         _ch = _conn.CreateModel();
-        
+
         _logger.LogInformation("Creating AMQP connection '{ConnectionName}'", connectionName);
 
         _ch.QueueDeclare(_opts.RequestQueue, durable: _opts.Persistent, exclusive: false, autoDelete: false, arguments: null);
@@ -73,7 +73,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
 
         _consumer = new AsyncEventingBasicConsumer(_ch);
         _consumer.Received += OnReceivedAsync;
-        
+
         // Use unique consumer tag to avoid conflicts with previous consumers
         _consumerTag = $"AmqpTransport-{_endpoint.Name}-{Guid.NewGuid()}";
         _ch.BasicConsume(_opts.RequestQueue, autoAck: false, consumer: _consumer, consumerTag: _consumerTag);
@@ -86,14 +86,14 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
     public async ValueTask<ConnectionContext?> AcceptAsync(CancellationToken cancellationToken = default)
     {
         _logger.LogDebug("AcceptAsync called, waiting for connection...");
-        
+
         if (await _acceptQueue.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false)
             && _acceptQueue.Reader.TryRead(out var ctx))
         {
             _logger.LogDebug("AcceptAsync returning connection {ConnectionId}", ctx.ConnectionId);
             return ctx;
         }
-        
+
         _logger.LogDebug("AcceptAsync returning null (no more connections)");
         return null;
     }
@@ -103,7 +103,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
     {
         // Complete the accept queue so any waiting AcceptAsync calls will complete
         _acceptQueue.Writer.TryComplete();
-        
+
         // Cancel the consumer first to stop receiving new messages
         try
         {
@@ -118,7 +118,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
         {
             // Ignore errors
         }
-        
+
         try
         {
             _ch?.Close();
@@ -180,7 +180,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
             // Kestrel reads from Transport.Input and writes to Transport.Output
             var inputPipe = new Pipe();
             var outputPipe = new Pipe();
-            
+
             var transport = new DuplexPipe(inputPipe.Reader, outputPipe.Writer);
 
             // Feed raw request into inputPipe.Writer
@@ -281,17 +281,17 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
                 _logger.LogWarning("Channel is null, cannot publish response for {CorrelationId}", correlationId);
                 return Task.CompletedTask;
             }
-            
+
             try
             {
                 // Parse raw HTTP response to extract status code, headers, and body
                 var responseEnvelope = ParseRawHttpResponse(responseRaw);
                 responseEnvelope.CorrelationId = Guid.Parse(correlationId);
-                
+
                 // Serialize to JSON with camelCase (to match gateway expectations)
                 var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
                 var jsonBytes = JsonSerializer.SerializeToUtf8Bytes(responseEnvelope, jsonOptions);
-                
+
                 var props = _ch.CreateBasicProperties();
                 props.Persistent = _opts.Persistent;
                 props.CorrelationId = correlationId;
@@ -307,20 +307,20 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
             {
                 _logger.LogError(ex, "Error publishing response for {CorrelationId}", correlationId);
             }
-            
+
             return Task.CompletedTask;
         }
-        
+
         HttpResponseEnvelope ParseRawHttpResponse(ReadOnlyMemory<byte> responseRaw)
         {
             var responseStr = Encoding.UTF8.GetString(responseRaw.Span);
             var lines = responseStr.Split(new[] { "\r\n" }, StringSplitOptions.None);
-            
+
             // Parse status line (e.g., "HTTP/1.1 200 OK")
             var statusLine = lines[0];
             var statusParts = statusLine.Split(' ', 3);
             var statusCode = int.Parse(statusParts[1]);
-            
+
             // Parse headers
             var headers = new Dictionary<string, string[]>();
             int bodyStartIndex = 0;
@@ -331,13 +331,13 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
                     bodyStartIndex = i + 1;
                     break;
                 }
-                
+
                 var colonIndex = lines[i].IndexOf(':');
                 if (colonIndex > 0)
                 {
                     var headerName = lines[i].Substring(0, colonIndex).Trim();
                     var headerValue = lines[i].Substring(colonIndex + 1).Trim();
-                    
+
                     if (headers.ContainsKey(headerName))
                     {
                         var existing = headers[headerName];
@@ -352,7 +352,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
                     }
                 }
             }
-            
+
             // Extract body (everything after the empty line)
             byte[]? body = null;
             if (bodyStartIndex < lines.Length)
@@ -363,7 +363,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
                     body = Encoding.UTF8.GetBytes(bodyText);
                 }
             }
-            
+
             return new HttpResponseEnvelope
             {
                 CorrelationId = Guid.Empty, // Will be set by caller

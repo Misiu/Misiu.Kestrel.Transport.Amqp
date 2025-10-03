@@ -44,7 +44,7 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
             };
             using var connection = factory.CreateConnection();
             using var channel = connection.CreateModel();
-            
+
             // Purge request and response queues
             try { channel.QueuePurge("amqp.gateway.requests"); } catch { }
             try { channel.QueuePurge("amqp.gateway.responses"); } catch { }
@@ -53,11 +53,11 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
         {
             // Ignore errors - queues might not exist yet
         }
-        
+
         // Create and start the local API
         _localApi = TestServerFactory.CreateLocalApi();
         await _localApi.StartAsync().WaitAsync(TimeSpan.FromSeconds(10));
-        
+
         var addresses = _localApi.Urls.ToList();
         _localApiBaseUrl = addresses.First();
 
@@ -70,7 +70,7 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
             _localApiBaseUrl);
 
         await _clientHost.StartAsync().WaitAsync(TimeSpan.FromSeconds(10));
-        
+
         // Small delay to let client initialize
         await Task.Delay(500);
 
@@ -83,12 +83,12 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
             immediateTimeoutSeconds: 3);
 
         await _gatewayServer.StartAsync().WaitAsync(TimeSpan.FromSeconds(10));
-        
+
         var gatewayAddresses = _gatewayServer.Urls.ToList();
         _gatewayBaseUrl = gatewayAddresses.First();
 
         _httpClient = new HttpClient { BaseAddress = new Uri(_gatewayBaseUrl) };
-        
+
         // Small delay to let gateway initialize
         await Task.Delay(500);
     }
@@ -96,7 +96,7 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         _httpClient?.Dispose();
-        
+
         if (_gatewayServer != null)
         {
             try
@@ -146,7 +146,7 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
         // Assert
         Assert.NotNull(response);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        
+
         var content = await response.Content.ReadAsStringAsync();
         Assert.Contains("Hello from client!", content);
     }
@@ -164,7 +164,7 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
         // Assert - Should reconnect and work after restart
         var response2 = await _httpClient.GetAsync("/api/data");
         Assert.Equal(HttpStatusCode.OK, response2.StatusCode);
-        
+
         var json = await response2.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("Data from API", json.GetProperty("message").GetString());
     }
@@ -177,7 +177,7 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        
+
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("Data from API", json.GetProperty("message").GetString());
         Assert.True(json.TryGetProperty("timestamp", out _));
@@ -191,13 +191,13 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
 
         // Assert - Should get 202 Accepted
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
-        
+
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("accepted", json.GetProperty("status").GetString());
-        
+
         var correlationId = json.GetProperty("correlationId").GetString();
         Assert.NotNull(correlationId);
-        
+
         var location = json.GetProperty("location").GetString();
         Assert.NotNull(location);
         Assert.Contains(correlationId, location);
@@ -208,12 +208,12 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
         // Retrieve the result
         var resultResponse = await _httpClient.GetAsync(location);
         Assert.Equal(HttpStatusCode.OK, resultResponse.StatusCode);
-        
+
         // Verify custom headers are present
         Assert.True(resultResponse.Headers.Contains("X-Processing-Time-Ms"));
         Assert.True(resultResponse.Headers.Contains("X-Server-Started-At-Utc"));
         Assert.True(resultResponse.Headers.Contains("X-Server-Completed-At-Utc"));
-        
+
         // Verify we get the actual response body, not JSON wrapper
         var resultBody = await resultResponse.Content.ReadAsStringAsync();
         var resultJson = JsonSerializer.Deserialize<JsonElement>(resultBody);
@@ -240,7 +240,7 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
         // BackgroundService catches exceptions and returns 502 (Bad Gateway) instead of 500
         // This is because it's forwarding to another service
         Assert.True(
-            response.StatusCode == HttpStatusCode.InternalServerError || 
+            response.StatusCode == HttpStatusCode.InternalServerError ||
             response.StatusCode == HttpStatusCode.BadGateway,
             $"Expected 500 or 502, got {response.StatusCode}");
     }
@@ -257,13 +257,13 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        
+
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        
+
         // Verify the custom header was passed through
         var customHeader = json.GetProperty("customHeader").GetString();
         Assert.Equal("test-value", customHeader);
-        
+
         // Verify Content-Type header is present in response
         Assert.NotNull(response.Content.Headers.ContentType);
         Assert.Equal("application/json", response.Content.Headers.ContentType.MediaType);
@@ -284,11 +284,11 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        
+
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("POST", json.GetProperty("method").GetString());
         Assert.Equal("/api/echo", json.GetProperty("path").GetString());
-        
+
         var receivedBody = json.GetProperty("receivedBody").GetString();
         Assert.Contains("Test", receivedBody);
         Assert.Contains("42", receivedBody);
@@ -320,7 +320,7 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
     {
         // Arrange - Send two requests: one slower (1 second), one fast (immediate)
         // The fast one should complete first but should be matched to the correct request
-        
+
         // Act - Send slower request first (takes 1 second)
         var slowerTask = Task.Run(async () =>
         {
@@ -371,11 +371,11 @@ public class BackgroundServiceApproachTests : IAsyncLifetime
 
         // Act - Get an error from the client API
         var errorResponse = await _httpClient.GetAsync("/api/error");
-        
+
         // The BackgroundService client catches exceptions and wraps them in 502
         // because it's treating the local API as a backend service
         Assert.True(
-            errorResponse.StatusCode == HttpStatusCode.InternalServerError || 
+            errorResponse.StatusCode == HttpStatusCode.InternalServerError ||
             errorResponse.StatusCode == HttpStatusCode.BadGateway);
     }
 }

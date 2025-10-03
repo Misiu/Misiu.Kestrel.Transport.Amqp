@@ -190,7 +190,7 @@ public class AmqpGatewayMiddleware
             context.Response.StatusCode = 202;
             context.Response.Headers["X-CorrelationId"] = correlationId.ToString();
             context.Response.Headers["Location"] = $"/amqp/result/{correlationId}";
-            
+
             var acceptedResponse = new
             {
                 correlationId = correlationId,
@@ -198,7 +198,7 @@ public class AmqpGatewayMiddleware
                 message = "Request is being processed. Check Location header for result.",
                 location = $"/amqp/result/{correlationId}"
             };
-            
+
             await context.Response.WriteAsJsonAsync(acceptedResponse);
             _logger.LogInformation("Request {CorrelationId} timed out, returning 202", correlationId);
         }
@@ -214,7 +214,7 @@ public class AmqpGatewayMiddleware
     private string TransformPath(string pathAndQuery)
     {
         var path = pathAndQuery;
-        
+
         // Remove prefix if configured
         if (!string.IsNullOrEmpty(_options.PathPrefixToRemove))
         {
@@ -223,7 +223,7 @@ public class AmqpGatewayMiddleware
             {
                 prefix = "/" + prefix;
             }
-            
+
             if (path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             {
                 path = path.Substring(prefix.Length);
@@ -233,7 +233,7 @@ public class AmqpGatewayMiddleware
                 }
             }
         }
-        
+
         // Add prefix if configured
         if (!string.IsNullOrEmpty(_options.PathPrefixToAdd))
         {
@@ -242,15 +242,15 @@ public class AmqpGatewayMiddleware
             {
                 prefix = "/" + prefix;
             }
-            
+
             if (prefix.EndsWith("/"))
             {
                 prefix = prefix.TrimEnd('/');
             }
-            
+
             path = prefix + path;
         }
-        
+
         return path;
     }
 }

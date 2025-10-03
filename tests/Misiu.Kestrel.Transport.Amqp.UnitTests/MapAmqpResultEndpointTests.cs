@@ -46,19 +46,19 @@ public class MapAmqpResultEndpointTests
 
         // Assert
         response.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
-        
+
         // Check custom headers
         response.Headers.Should().Contain(h => h.Key == "X-Processing-Time-Ms");
         response.Headers.GetValues("X-Processing-Time-Ms").First().Should().Be("1500");
-        
+
         response.Headers.Should().Contain(h => h.Key == "X-Server-Started-At-Utc");
         response.Headers.Should().Contain(h => h.Key == "X-Server-Completed-At-Utc");
-        
+
         // Check original headers
         response.Content.Headers.ContentType?.MediaType.Should().Be("application/json");
         response.Headers.Should().Contain(h => h.Key == "X-Custom-Header");
         response.Headers.GetValues("X-Custom-Header").First().Should().Be("custom-value");
-        
+
         // Check body
         var body = await response.Content.ReadAsStringAsync();
         body.Should().Be("{\"message\":\"test\"}");
@@ -71,7 +71,7 @@ public class MapAmqpResultEndpointTests
         var correlationId = Guid.NewGuid();
         // Simulate PNG header
         var pngData = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
-        
+
         var envelope = new HttpResponseEnvelope
         {
             CorrelationId = correlationId,
@@ -101,7 +101,7 @@ public class MapAmqpResultEndpointTests
         // Assert
         response.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
         response.Content.Headers.ContentType?.MediaType.Should().Be("image/png");
-        
+
         var body = await response.Content.ReadAsByteArrayAsync();
         body.Should().Equal(pngData);
     }
@@ -112,7 +112,7 @@ public class MapAmqpResultEndpointTests
         // Arrange
         var correlationId = Guid.NewGuid();
         var textContent = "This is plain text content";
-        
+
         var envelope = new HttpResponseEnvelope
         {
             CorrelationId = correlationId,
@@ -142,7 +142,7 @@ public class MapAmqpResultEndpointTests
         // Assert
         response.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
         response.Content.Headers.ContentType?.MediaType.Should().Be("text/plain");
-        
+
         var body = await response.Content.ReadAsStringAsync();
         body.Should().Be(textContent);
     }
@@ -152,7 +152,7 @@ public class MapAmqpResultEndpointTests
     {
         // Arrange
         var correlationId = Guid.NewGuid();
-        
+
         var envelope = new HttpResponseEnvelope
         {
             CorrelationId = correlationId,
@@ -179,7 +179,7 @@ public class MapAmqpResultEndpointTests
         // Assert
         response.StatusCode.Should().Be(System.Net.HttpStatusCode.NoContent);
         response.Headers.Should().Contain(h => h.Key == "X-Processing-Time-Ms");
-        
+
         var body = await response.Content.ReadAsStringAsync();
         body.Should().BeEmpty();
     }
@@ -199,7 +199,7 @@ public class MapAmqpResultEndpointTests
 
         // Assert
         response.StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound);
-        
+
         var body = await response.Content.ReadAsStringAsync();
         body.Should().Contain("not_found");
         body.Should().Contain(correlationId.ToString());
@@ -210,7 +210,7 @@ public class MapAmqpResultEndpointTests
     {
         // Arrange
         var correlationId = Guid.NewGuid();
-        
+
         var envelope = new HttpResponseEnvelope
         {
             CorrelationId = correlationId,
@@ -245,7 +245,7 @@ public class MapAmqpResultEndpointTests
         response.Headers.Should().Contain(h => h.Key == "X-Header-1");
         response.Headers.Should().Contain(h => h.Key == "X-Header-2");
         response.Headers.Should().Contain(h => h.Key == "X-Multi-Value");
-        
+
         response.Headers.GetValues("X-Multi-Value").Should().Equal("val1", "val2", "val3");
     }
 
@@ -254,7 +254,7 @@ public class MapAmqpResultEndpointTests
     {
         // Arrange
         var correlationId = Guid.NewGuid();
-        
+
         var envelope = new HttpResponseEnvelope
         {
             CorrelationId = correlationId,
@@ -283,7 +283,7 @@ public class MapAmqpResultEndpointTests
 
         // Assert
         response.StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound);
-        
+
         var body = await response.Content.ReadAsStringAsync();
         body.Should().Be("{\"error\":\"not found\"}");
     }
@@ -293,7 +293,7 @@ public class MapAmqpResultEndpointTests
     {
         // Arrange
         var correlationId = Guid.NewGuid();
-        
+
         var envelope = new HttpResponseEnvelope
         {
             CorrelationId = correlationId,

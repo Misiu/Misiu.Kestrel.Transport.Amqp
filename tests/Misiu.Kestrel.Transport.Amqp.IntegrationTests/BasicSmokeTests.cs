@@ -43,7 +43,7 @@ public class BasicSmokeTests
         {
             // Act
             await server.StartAsync();
-            
+
             // Assert
             Assert.NotNull(server);
             Assert.NotEmpty(server.Urls);
@@ -66,7 +66,7 @@ public class BasicSmokeTests
         {
             // Act
             await api.StartAsync();
-            
+
             // Assert
             Assert.NotNull(api);
             Assert.NotEmpty(api.Urls);

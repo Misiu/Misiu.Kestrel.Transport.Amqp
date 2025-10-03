@@ -47,7 +47,7 @@ public class DelayedResultEndpointTests : IAsyncLifetime
             };
             using var connection = factory.CreateConnection();
             using var channel = connection.CreateModel();
-            
+
             try { channel.QueuePurge("amqp.gateway.requests"); } catch { }
             try { channel.QueuePurge("amqp.gateway.responses"); } catch { }
         }
@@ -55,11 +55,11 @@ public class DelayedResultEndpointTests : IAsyncLifetime
         {
             // Ignore errors - queues might not exist yet
         }
-        
+
         // Create local API with additional test endpoints
         _localApi = CreateLocalApiWithExtraEndpoints();
         await _localApi.StartAsync().WaitAsync(TimeSpan.FromSeconds(10));
-        
+
         var addresses = _localApi.Urls.ToList();
         _localApiBaseUrl = addresses.First();
 
@@ -83,7 +83,7 @@ public class DelayedResultEndpointTests : IAsyncLifetime
             immediateTimeoutSeconds: 1);
 
         await _gatewayServer.StartAsync().WaitAsync(TimeSpan.FromSeconds(10));
-        
+
         var gatewayAddresses = _gatewayServer.Urls.ToList();
         _gatewayBaseUrl = gatewayAddresses.First();
 
@@ -94,19 +94,19 @@ public class DelayedResultEndpointTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         _httpClient?.Dispose();
-        
+
         if (_gatewayServer != null)
         {
             await _gatewayServer.StopAsync();
             await _gatewayServer.DisposeAsync();
         }
-        
+
         if (_clientHost != null)
         {
             await _clientHost.StopAsync();
             _clientHost.Dispose();
         }
-        
+
         if (_localApi != null)
         {
             await _localApi.StopAsync();
@@ -119,14 +119,14 @@ public class DelayedResultEndpointTests : IAsyncLifetime
     {
         // Act - Request that takes longer than timeout
         var response = await _httpClient!.GetAsync("/api/json-slow");
-        
+
         // Assert - Should get 202
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
-        
+
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         var correlationId = json.GetProperty("correlationId").GetString();
         var location = json.GetProperty("location").GetString();
-        
+
         Assert.NotNull(correlationId);
         Assert.NotNull(location);
 
@@ -135,16 +135,16 @@ public class DelayedResultEndpointTests : IAsyncLifetime
 
         // Retrieve result
         var resultResponse = await _httpClient.GetAsync(location);
-        
+
         // Assert - Proper HTTP response
         Assert.Equal(HttpStatusCode.OK, resultResponse.StatusCode);
         Assert.Equal("application/json", resultResponse.Content.Headers.ContentType?.MediaType);
-        
+
         // Verify custom headers
         Assert.True(resultResponse.Headers.Contains("X-Processing-Time-Ms"));
         Assert.True(resultResponse.Headers.Contains("X-Server-Started-At-Utc"));
         Assert.True(resultResponse.Headers.Contains("X-Server-Completed-At-Utc"));
-        
+
         // Verify actual response body (not wrapped in JSON)
         var body = await resultResponse.Content.ReadAsStringAsync();
         var bodyJson = JsonSerializer.Deserialize<JsonElement>(body);
@@ -157,7 +157,7 @@ public class DelayedResultEndpointTests : IAsyncLifetime
         // Act
         var response = await _httpClient!.GetAsync("/api/text-slow");
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
-        
+
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         var location = json.GetProperty("location").GetString();
 
@@ -166,11 +166,11 @@ public class DelayedResultEndpointTests : IAsyncLifetime
 
         // Retrieve result
         var resultResponse = await _httpClient.GetAsync(location);
-        
+
         // Assert
         Assert.Equal(HttpStatusCode.OK, resultResponse.StatusCode);
         Assert.Equal("text/plain", resultResponse.Content.Headers.ContentType?.MediaType);
-        
+
         var body = await resultResponse.Content.ReadAsStringAsync();
         Assert.Equal("Plain text response", body);
     }
@@ -181,7 +181,7 @@ public class DelayedResultEndpointTests : IAsyncLifetime
         // Act
         var response = await _httpClient!.GetAsync("/api/binary-slow");
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
-        
+
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         var location = json.GetProperty("location").GetString();
 
@@ -190,11 +190,11 @@ public class DelayedResultEndpointTests : IAsyncLifetime
 
         // Retrieve result
         var resultResponse = await _httpClient.GetAsync(location);
-        
+
         // Assert
         Assert.Equal(HttpStatusCode.OK, resultResponse.StatusCode);
         Assert.Equal("application/octet-stream", resultResponse.Content.Headers.ContentType?.MediaType);
-        
+
         var body = await resultResponse.Content.ReadAsByteArrayAsync();
         Assert.Equal(new byte[] { 0x01, 0x02, 0x03, 0x04, 0x05 }, body);
     }
@@ -205,7 +205,7 @@ public class DelayedResultEndpointTests : IAsyncLifetime
         // Act
         var response = await _httpClient!.GetAsync("/api/headers-slow");
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
-        
+
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         var location = json.GetProperty("location").GetString();
 
@@ -214,16 +214,16 @@ public class DelayedResultEndpointTests : IAsyncLifetime
 
         // Retrieve result
         var resultResponse = await _httpClient.GetAsync(location);
-        
+
         // Assert
         Assert.Equal(HttpStatusCode.OK, resultResponse.StatusCode);
-        
+
         // Verify custom headers from the original response
         Assert.True(resultResponse.Headers.Contains("X-Custom-1"));
         Assert.True(resultResponse.Headers.Contains("X-Custom-2"));
         Assert.Equal("value1", resultResponse.Headers.GetValues("X-Custom-1").First());
         Assert.Equal("value2", resultResponse.Headers.GetValues("X-Custom-2").First());
-        
+
         // Verify processing metadata headers
         Assert.True(resultResponse.Headers.Contains("X-Processing-Time-Ms"));
         Assert.True(resultResponse.Headers.Contains("X-Server-Started-At-Utc"));
@@ -236,7 +236,7 @@ public class DelayedResultEndpointTests : IAsyncLifetime
         // Act
         var response = await _httpClient!.GetAsync("/api/notfound-slow");
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
-        
+
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         var location = json.GetProperty("location").GetString();
 
@@ -245,7 +245,7 @@ public class DelayedResultEndpointTests : IAsyncLifetime
 
         // Retrieve result
         var resultResponse = await _httpClient.GetAsync(location);
-        
+
         // Assert - Should return 404, not 200
         Assert.Equal(HttpStatusCode.NotFound, resultResponse.StatusCode);
     }
@@ -256,7 +256,7 @@ public class DelayedResultEndpointTests : IAsyncLifetime
         // Act
         var response = await _httpClient!.GetAsync("/api/nocontent-slow");
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
-        
+
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         var location = json.GetProperty("location").GetString();
 
@@ -265,10 +265,10 @@ public class DelayedResultEndpointTests : IAsyncLifetime
 
         // Retrieve result
         var resultResponse = await _httpClient.GetAsync(location);
-        
+
         // Assert
         Assert.Equal(HttpStatusCode.NoContent, resultResponse.StatusCode);
-        
+
         var body = await resultResponse.Content.ReadAsStringAsync();
         Assert.Empty(body);
     }
@@ -279,10 +279,10 @@ public class DelayedResultEndpointTests : IAsyncLifetime
         // Act
         var fakeCorrelationId = Guid.NewGuid();
         var resultResponse = await _httpClient!.GetAsync($"/amqp/result/{fakeCorrelationId}");
-        
+
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, resultResponse.StatusCode);
-        
+
         var body = await resultResponse.Content.ReadAsStringAsync();
         Assert.Contains("not_found", body);
         Assert.Contains(fakeCorrelationId.ToString(), body);

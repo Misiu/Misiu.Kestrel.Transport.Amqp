@@ -308,7 +308,7 @@ public class PathTransformationTests
     private string TransformPathLogic(string pathAndQuery, AmqpTransportOptions options)
     {
         var path = pathAndQuery;
-        
+
         // Remove prefix if configured
         if (!string.IsNullOrEmpty(options.PathPrefixToRemove))
         {
@@ -317,7 +317,7 @@ public class PathTransformationTests
             {
                 prefix = "/" + prefix;
             }
-            
+
             if (path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             {
                 path = path.Substring(prefix.Length);
@@ -327,7 +327,7 @@ public class PathTransformationTests
                 }
             }
         }
-        
+
         // Add prefix if configured
         if (!string.IsNullOrEmpty(options.PathPrefixToAdd))
         {
@@ -336,15 +336,15 @@ public class PathTransformationTests
             {
                 prefix = "/" + prefix;
             }
-            
+
             if (prefix.EndsWith("/"))
             {
                 prefix = prefix.TrimEnd('/');
             }
-            
+
             path = prefix + path;
         }
-        
+
         return path;
     }
 }
