@@ -102,13 +102,14 @@ public class AmqpConnectionListenerFactoryTests
         loggerFactory.Setup(x => x.CreateLogger(It.IsAny<string>()))
             .Returns(new Mock<ILogger>().Object);
         var optionsMonitor = new Mock<IOptionsMonitor<AmqpTransportOptions>>();
+        // Use non-standard port to ensure RabbitMQ is not running on it
         optionsMonitor.Setup(x => x.Get(It.IsAny<string>()))
-            .Returns(new AmqpTransportOptions());
+            .Returns(new AmqpTransportOptions { Port = 19999 });
         var factory = new AmqpConnectionListenerFactory(loggerFactory.Object, optionsMonitor.Object);
         var endpoint = new AmqpEndPoint(endpointName);
 
         // Act & Assert
-        // Will throw because it tries to connect to RabbitMQ which isn't available in tests
+        // Will throw because it tries to connect to RabbitMQ which isn't available on this port
         var act = async () => await factory.BindAsync(endpoint, CancellationToken.None);
         await act.Should().ThrowAsync<Exception>();
     }
@@ -121,8 +122,9 @@ public class AmqpConnectionListenerFactoryTests
         loggerFactory.Setup(x => x.CreateLogger(It.IsAny<string>()))
             .Returns(new Mock<ILogger>().Object);
         var optionsMonitor = new Mock<IOptionsMonitor<AmqpTransportOptions>>();
+        // Use non-standard port to ensure RabbitMQ is not running on it
         optionsMonitor.Setup(x => x.Get(It.IsAny<string>()))
-            .Returns(new AmqpTransportOptions());
+            .Returns(new AmqpTransportOptions { Port = 19999 });
         var factory = new AmqpConnectionListenerFactory(loggerFactory.Object, optionsMonitor.Object);
         var endpoint = new AmqpEndPoint("test-endpoint");
         var cts = new CancellationTokenSource();
