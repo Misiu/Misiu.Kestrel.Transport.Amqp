@@ -20,9 +20,10 @@ public class AmqpGatewayMiddleware
     private readonly AmqpTransportOptions _options;
     private readonly IMemoryCache _cache;
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<HttpResponseEnvelope>> _pendingRequests;
-    private readonly IConnection _connection;
-    private readonly IChannel _channel;
+    private IConnection? _connection;
+    private IChannel? _channel;
     private static readonly JsonSerializerOptions _jsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private readonly SemaphoreSlim _reconnectLock = new(1, 1);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AmqpGatewayMiddleware"/> class
@@ -39,7 +40,19 @@ public class AmqpGatewayMiddleware
         _cache = cache;
         _pendingRequests = new ConcurrentDictionary<Guid, TaskCompletionSource<HttpResponseEnvelope>>();
 
-        // Initialize RabbitMQ connection (using GetAwaiter().GetResult() for constructor)
+        // Initialize RabbitMQ connection
+        try
+        {
+            InitializeConnection().GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to initialize RabbitMQ connection. Middleware will attempt to reconnect on requests.");
+        }
+    }
+
+    private async Task InitializeConnection()
+    {
         var factory = new ConnectionFactory
         {
             HostName = _options.HostName,
@@ -51,19 +64,26 @@ public class AmqpGatewayMiddleware
             TopologyRecoveryEnabled = true
         };
 
-        _connection = factory.CreateConnectionAsync("AmqpGateway-Server").GetAwaiter().GetResult();
-        _channel = _connection.CreateChannelAsync().GetAwaiter().GetResult();
+        _connection = await factory.CreateConnectionAsync("AmqpGateway-Server", CancellationToken.None).ConfigureAwait(false);
+        _channel = await _connection.CreateChannelAsync(cancellationToken: CancellationToken.None).ConfigureAwait(false);
 
         // Declare queues
-        _channel.QueueDeclareAsync(_options.RequestQueue, durable: _options.Persistent, exclusive: false, autoDelete: false).GetAwaiter().GetResult();
-        _channel.QueueDeclareAsync(_options.ResponseQueue, durable: _options.Persistent, exclusive: false, autoDelete: false).GetAwaiter().GetResult();
+        await _channel.QueueDeclareAsync(_options.RequestQueue, durable: _options.Persistent, exclusive: false, autoDelete: false, arguments: null, cancellationToken: CancellationToken.None).ConfigureAwait(false);
+        await _channel.QueueDeclareAsync(_options.ResponseQueue, durable: _options.Persistent, exclusive: false, autoDelete: false, arguments: null, cancellationToken: CancellationToken.None).ConfigureAwait(false);
 
         // Start consuming responses
-        StartResponseConsumer();
+        await StartResponseConsumer().ConfigureAwait(false);
+
+        _logger.LogInformation("RabbitMQ connection initialized successfully");
     }
 
-    private void StartResponseConsumer()
+    private async Task StartResponseConsumer()
     {
+        if (_channel == null)
+        {
+            throw new InvalidOperationException("Channel is not initialized");
+        }
+
         var consumer = new AsyncEventingBasicConsumer(_channel);
         consumer.ReceivedAsync += async (sender, ea) =>
         {
@@ -73,7 +93,10 @@ public class AmqpGatewayMiddleware
                 if (string.IsNullOrWhiteSpace(correlationIdStr) || !Guid.TryParse(correlationIdStr, out var correlationId))
                 {
                     _logger.LogWarning("Received response without valid CorrelationId");
-                    await _channel.BasicAckAsync(ea.DeliveryTag, false).ConfigureAwait(false);
+                    if (_channel != null)
+                    {
+                        await _channel.BasicAckAsync(ea.DeliveryTag, false, CancellationToken.None).ConfigureAwait(false);
+                    }
                     return;
                 }
 
@@ -81,7 +104,10 @@ public class AmqpGatewayMiddleware
                 if (envelope == null)
                 {
                     _logger.LogWarning("Failed to deserialize response for {CorrelationId}", correlationId);
-                    await _channel.BasicAckAsync(ea.DeliveryTag, false).ConfigureAwait(false);
+                    if (_channel != null)
+                    {
+                        await _channel.BasicAckAsync(ea.DeliveryTag, false, CancellationToken.None).ConfigureAwait(false);
+                    }
                     return;
                 }
 
@@ -95,17 +121,30 @@ public class AmqpGatewayMiddleware
                 var cacheKey = $"amqp:result:{correlationId:N}";
                 _cache.Set(cacheKey, envelope, TimeSpan.FromMinutes(_options.ResultTtlMinutes));
 
-                await _channel.BasicAckAsync(ea.DeliveryTag, false).ConfigureAwait(false);
+                if (_channel != null)
+                {
+                    await _channel.BasicAckAsync(ea.DeliveryTag, false, CancellationToken.None).ConfigureAwait(false);
+                }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error processing response");
-                await _channel.BasicAckAsync(ea.DeliveryTag, false).ConfigureAwait(false);
+                if (_channel != null)
+                {
+                    try
+                    {
+                        await _channel.BasicAckAsync(ea.DeliveryTag, false, CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // Ignore ack errors during error handling
+                    }
+                }
             }
         };
 
-        _channel.BasicQosAsync(0, 50, false).GetAwaiter().GetResult();
-        _channel.BasicConsumeAsync(_options.ResponseQueue, autoAck: false, consumer: consumer).GetAwaiter().GetResult();
+        await _channel.BasicQosAsync(0, 50, false, CancellationToken.None).ConfigureAwait(false);
+        await _channel.BasicConsumeAsync(_options.ResponseQueue, autoAck: false, consumer: consumer, cancellationToken: CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -113,15 +152,23 @@ public class AmqpGatewayMiddleware
     /// </summary>
     public async Task InvokeAsync(HttpContext context)
     {
+        // Check RabbitMQ connection health
+        if (!await EnsureConnectionAsync(context.RequestAborted).ConfigureAwait(false))
+        {
+            context.Response.StatusCode = 502;
+            await context.Response.WriteAsync("Service temporarily unavailable - unable to connect to message broker", context.RequestAborted).ConfigureAwait(false);
+            return;
+        }
+
         var correlationId = Guid.NewGuid();
         context.Items["AmqpCorrelationId"] = correlationId;
 
         // Read request body
         byte[]? body = null;
-        if (context.Request.ContentLength.HasValue && context.Request.ContentLength.Value > 0)
+        if (context.Request.ContentLength is > 0)
         {
             using var ms = new MemoryStream((int)context.Request.ContentLength.Value);
-            await context.Request.Body.CopyToAsync(ms);
+            await context.Request.Body.CopyToAsync(ms, context.RequestAborted).ConfigureAwait(false);
             body = ms.ToArray();
         }
 
@@ -160,12 +207,13 @@ public class AmqpGatewayMiddleware
 
         try
         {
-            await _channel.BasicPublishAsync("", _options.RequestQueue, false, props, payload).ConfigureAwait(false);
+            await _channel!.BasicPublishAsync("", _options.RequestQueue, false, props, payload, context.RequestAborted).ConfigureAwait(false);
             _logger.LogInformation("Published request {CorrelationId} to {Queue}", correlationId, _options.RequestQueue);
 
             // Wait for response with timeout
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(_options.ImmediateTimeoutSeconds));
-            var response = await tcs.Task.WaitAsync(cts.Token);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(_options.ImmediateTimeoutSeconds));
+            var response = await tcs.Task.WaitAsync(cts.Token).ConfigureAwait(false);
 
             // Return response
             context.Response.StatusCode = response.StatusCode;
@@ -182,11 +230,11 @@ public class AmqpGatewayMiddleware
                 }
             }
 
-            if (response.Body != null && response.Body.Length > 0)
+            if (response.Body is { Length: > 0 })
             {
                 // Set Content-Length to avoid chunked transfer encoding
                 context.Response.ContentLength = response.Body.Length;
-                await context.Response.Body.WriteAsync(response.Body);
+                await context.Response.Body.WriteAsync(response.Body, context.RequestAborted).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -205,7 +253,7 @@ public class AmqpGatewayMiddleware
                 location = $"/amqp/result/{correlationId}"
             };
 
-            await context.Response.WriteAsJsonAsync(acceptedResponse);
+            await context.Response.WriteAsJsonAsync(acceptedResponse, context.RequestAborted).ConfigureAwait(false);
             _logger.LogInformation("Request {CorrelationId} timed out, returning 202", correlationId);
         }
         catch (Exception ex)
@@ -213,7 +261,89 @@ public class AmqpGatewayMiddleware
             _logger.LogError(ex, "Error processing request {CorrelationId}", correlationId);
             _pendingRequests.TryRemove(correlationId, out _);
             context.Response.StatusCode = 500;
-            await context.Response.WriteAsync("Internal server error");
+            await context.Response.WriteAsync("Internal server error", context.RequestAborted).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<bool> EnsureConnectionAsync(CancellationToken cancellationToken)
+    {
+        // Check if connection and channel are healthy
+        if (_connection is { IsOpen: true } && _channel is { IsOpen: true })
+        {
+            return true;
+        }
+
+        // Try to reconnect
+        await _reconnectLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // Double-check after acquiring lock
+            if (_connection is { IsOpen: true } && _channel is { IsOpen: true })
+            {
+                return true;
+            }
+
+            _logger.LogWarning("RabbitMQ connection is closed. Attempting to reconnect...");
+
+            // Clean up old connection/channel
+            await CleanupConnectionAsync().ConfigureAwait(false);
+
+            // Attempt reconnection with timeout
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+
+            try
+            {
+                await InitializeConnection().ConfigureAwait(false);
+                _logger.LogInformation("Successfully reconnected to RabbitMQ");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to reconnect to RabbitMQ");
+                return false;
+            }
+        }
+        finally
+        {
+            _reconnectLock.Release();
+        }
+    }
+
+    private async Task CleanupConnectionAsync()
+    {
+        if (_channel != null)
+        {
+            try
+            {
+                if (_channel.IsOpen)
+                {
+                    await _channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                _channel.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error closing channel during cleanup");
+            }
+            _channel = null;
+        }
+
+        if (_connection != null)
+        {
+            try
+            {
+                if (_connection.IsOpen)
+                {
+                    await _connection.CloseAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                _connection.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error closing connection during cleanup");
+            }
+            _connection = null;
         }
     }
 

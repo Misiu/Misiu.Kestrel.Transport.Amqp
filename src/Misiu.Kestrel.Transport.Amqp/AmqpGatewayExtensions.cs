@@ -90,11 +90,11 @@ public static class AmqpGatewayExtensions
                 }
 
                 // Write body if present
-                if (envelope.Body != null && envelope.Body.Length > 0)
+                if (envelope.Body is { Length: > 0 })
                 {
                     // Set Content-Length to avoid chunked transfer encoding
                     context.Response.ContentLength = envelope.Body.Length;
-                    await context.Response.Body.WriteAsync(envelope.Body);
+                    await context.Response.Body.WriteAsync(envelope.Body, context.RequestAborted).ConfigureAwait(false);
                 }
             }
             else
