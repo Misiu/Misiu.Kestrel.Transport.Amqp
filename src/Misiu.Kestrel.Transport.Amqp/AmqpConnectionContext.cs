@@ -14,7 +14,7 @@ namespace Misiu.Kestrel.Transport.Amqp;
 /// </summary>
 public sealed class AmqpConnectionContext : ConnectionContext
 {
-    private readonly IModel _channel;
+    private readonly IChannel _channel;
     private readonly ulong _deliveryTag;
     private readonly Func<ReadOnlyMemory<byte>, Task> _publishResponse;
     private readonly ILogger _logger;
@@ -27,7 +27,7 @@ public sealed class AmqpConnectionContext : ConnectionContext
     public AmqpConnectionContext(
         IDuplexPipe transport,
         PipeReader outputReader,
-        IModel channel,
+        IChannel channel,
         ulong deliveryTag,
         Func<ReadOnlyMemory<byte>, Task> publishResponse,
         ILogger logger,
@@ -102,7 +102,7 @@ public sealed class AmqpConnectionContext : ConnectionContext
             await _publishResponse(ms.ToArray()).ConfigureAwait(false);
             try
             {
-                _channel.BasicAck(_deliveryTag, multiple: false);
+                await _channel.BasicAckAsync(_deliveryTag, multiple: false).ConfigureAwait(false);
             }
             catch
             {
@@ -126,7 +126,7 @@ public sealed class AmqpConnectionContext : ConnectionContext
 
             try
             {
-                _channel.BasicAck(_deliveryTag, multiple: false);
+                await _channel.BasicAckAsync(_deliveryTag, multiple: false).ConfigureAwait(false);
             }
             catch
             {
@@ -138,7 +138,7 @@ public sealed class AmqpConnectionContext : ConnectionContext
             _logger.LogError(ex, "Failed to publish AMQP response for {ConnectionId}", _id);
             try
             {
-                _channel.BasicAck(_deliveryTag, multiple: false);
+                await _channel.BasicAckAsync(_deliveryTag, multiple: false).ConfigureAwait(false);
             }
             catch
             {

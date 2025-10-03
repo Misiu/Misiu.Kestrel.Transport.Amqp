@@ -2,12 +2,12 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
-using Misiu.Kestrel.Transport.Amqp.IntegrationTests.Infrastructure;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Misiu.Kestrel.Transport.Amqp.IntegrationTests.Infrastructure;
 
 namespace Misiu.Kestrel.Transport.Amqp.IntegrationTests;
 
@@ -45,11 +45,11 @@ public class DelayedResultEndpointTests : IAsyncLifetime
                 UserName = _rabbitMq.UserName,
                 Password = _rabbitMq.Password
             };
-            using var connection = factory.CreateConnection();
-            using var channel = connection.CreateModel();
+            using var connection = await factory.CreateConnectionAsync().ConfigureAwait(false);
+            using var channel = await connection.CreateChannelAsync().ConfigureAwait(false);
 
-            try { channel.QueuePurge("amqp.gateway.requests"); } catch { }
-            try { channel.QueuePurge("amqp.gateway.responses"); } catch { }
+            try { await channel.QueuePurgeAsync("amqp.gateway.requests").ConfigureAwait(false); } catch { }
+            try { await channel.QueuePurgeAsync("amqp.gateway.responses").ConfigureAwait(false); } catch { }
         }
         catch
         {

@@ -24,7 +24,7 @@ public class AmqpClientConsumer : BackgroundService
     private readonly IHostApplicationLifetime? _lifetime;
     private readonly TaskCompletionSource<bool> _serverStarted = new();
     private IConnection? _connection;
-    private IModel? _channel;
+    private IChannel? _channel;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AmqpClientConsumer"/> class
@@ -109,20 +109,19 @@ public class AmqpClientConsumer : BackgroundService
             VirtualHost = _options.VirtualHost,
             UserName = _options.UserName,
             Password = _options.Password,
-            DispatchConsumersAsync = true,
             AutomaticRecoveryEnabled = true,
             TopologyRecoveryEnabled = true
         };
 
-        _connection = factory.CreateConnection("AmqpClient-Consumer");
-        _channel = _connection.CreateModel();
+        _connection = await factory.CreateConnectionAsync("AmqpClient-Consumer").ConfigureAwait(false);
+        _channel = await _connection.CreateChannelAsync().ConfigureAwait(false);
 
         // Declare queues
-        _channel.QueueDeclare(_options.RequestQueue, durable: _options.Persistent, exclusive: false, autoDelete: false);
-        _channel.QueueDeclare(_options.ResponseQueue, durable: _options.Persistent, exclusive: false, autoDelete: false);
+        await _channel.QueueDeclareAsync(_options.RequestQueue, durable: _options.Persistent, exclusive: false, autoDelete: false).ConfigureAwait(false);
+        await _channel.QueueDeclareAsync(_options.ResponseQueue, durable: _options.Persistent, exclusive: false, autoDelete: false).ConfigureAwait(false);
 
         var consumer = new AsyncEventingBasicConsumer(_channel);
-        consumer.Received += async (sender, ea) =>
+        consumer.ReceivedAsync += async (sender, ea) =>
         {
             try
             {
@@ -130,7 +129,7 @@ public class AmqpClientConsumer : BackgroundService
                 if (string.IsNullOrWhiteSpace(correlationIdStr) || !Guid.TryParse(correlationIdStr, out var correlationId))
                 {
                     _logger.LogWarning("Received request without valid CorrelationId");
-                    _channel!.BasicAck(ea.DeliveryTag, false);
+                    await _channel!.BasicAckAsync(ea.DeliveryTag, false).ConfigureAwait(false);
                     return;
                 }
 
@@ -138,7 +137,7 @@ public class AmqpClientConsumer : BackgroundService
                 if (request == null)
                 {
                     _logger.LogWarning("Failed to deserialize request for {CorrelationId}", correlationId);
-                    _channel!.BasicAck(ea.DeliveryTag, false);
+                    await _channel!.BasicAckAsync(ea.DeliveryTag, false).ConfigureAwait(false);
                     return;
                 }
 
@@ -170,7 +169,7 @@ public class AmqpClientConsumer : BackgroundService
 
                     // Copy response headers (excluding hop-by-hop headers)
                     var hopByHopHeaders = new[] { "Connection", "Keep-Alive", "Transfer-Encoding", "Upgrade", "Proxy-Connection" };
-                    
+
                     foreach (var header in response.Headers)
                     {
                         // Skip hop-by-hop headers
@@ -191,11 +190,13 @@ public class AmqpClientConsumer : BackgroundService
 
                     // Publish response
                     var responsePayload = JsonSerializer.SerializeToUtf8Bytes(responseEnvelope, _jsonOptions);
-                    var props = _channel!.CreateBasicProperties();
-                    props.CorrelationId = correlationId.ToString();
-                    props.Persistent = _options.Persistent;
+                    var props = new BasicProperties
+                    {
+                        CorrelationId = correlationId.ToString(),
+                        Persistent = _options.Persistent
+                    };
 
-                    _channel.BasicPublish("", _options.ResponseQueue, false, props, responsePayload);
+                    await _channel.BasicPublishAsync("", _options.ResponseQueue, false, props, responsePayload).ConfigureAwait(false);
                     _logger.LogInformation("Published response for {CorrelationId} with status {StatusCode} ({Duration}ms)",
                         correlationId, response.StatusCode, sw.ElapsedMilliseconds);
                 }
@@ -221,26 +222,26 @@ public class AmqpClientConsumer : BackgroundService
                     };
 
                     var errorPayload = JsonSerializer.SerializeToUtf8Bytes(errorEnvelope, _jsonOptions);
-                    var props = _channel!.CreateBasicProperties();
-                    props.CorrelationId = correlationId.ToString();
-                    props.Persistent = _options.Persistent;
+                    var props = new BasicProperties
+                    {
+                        CorrelationId = correlationId.ToString(),
+                        Persistent = _options.Persistent
+                    };
 
-                    _channel.BasicPublish("", _options.ResponseQueue, false, props, errorPayload);
+                    await _channel.BasicPublishAsync("", _options.ResponseQueue, false, props, errorPayload).ConfigureAwait(false);
                 }
 
-                _channel!.BasicAck(ea.DeliveryTag, false);
+                await _channel!.BasicAckAsync(ea.DeliveryTag, false).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unhandled error processing message");
-                _channel!.BasicAck(ea.DeliveryTag, false);
+                await _channel!.BasicAckAsync(ea.DeliveryTag, false).ConfigureAwait(false);
             }
-
-            await Task.Yield();
         };
 
-        _channel.BasicQos(0, _options.PrefetchCount, false);
-        _channel.BasicConsume(_options.RequestQueue, autoAck: false, consumer: consumer);
+        await _channel.BasicQosAsync(0, _options.PrefetchCount, false).ConfigureAwait(false);
+        await _channel.BasicConsumeAsync(_options.RequestQueue, autoAck: false, consumer: consumer).ConfigureAwait(false);
 
         _logger.LogInformation("AMQP Client Consumer started, listening on {Queue}", _options.RequestQueue);
 
@@ -302,7 +303,7 @@ public class AmqpClientConsumer : BackgroundService
             {
                 try
                 {
-                    _channel.Close();
+                    _channel.CloseAsync().GetAwaiter().GetResult();
                 }
                 catch (Exception ex)
                 {
@@ -316,7 +317,7 @@ public class AmqpClientConsumer : BackgroundService
             {
                 try
                 {
-                    _connection.Close();
+                    _connection.CloseAsync().GetAwaiter().GetResult();
                 }
                 catch (Exception ex)
                 {
