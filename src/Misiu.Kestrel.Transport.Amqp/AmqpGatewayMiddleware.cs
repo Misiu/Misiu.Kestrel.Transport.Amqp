@@ -21,7 +21,7 @@ public class AmqpGatewayMiddleware
     private readonly IMemoryCache _cache;
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<HttpResponseEnvelope>> _pendingRequests;
     private readonly IConnection _connection;
-    private readonly IModel _channel;
+    private readonly IChannel _channel;
     private static readonly JsonSerializerOptions _jsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     /// <summary>
@@ -39,7 +39,7 @@ public class AmqpGatewayMiddleware
         _cache = cache;
         _pendingRequests = new ConcurrentDictionary<Guid, TaskCompletionSource<HttpResponseEnvelope>>();
 
-        // Initialize RabbitMQ connection
+        // Initialize RabbitMQ connection (using GetAwaiter().GetResult() for constructor)
         var factory = new ConnectionFactory
         {
             HostName = _options.HostName,
@@ -47,17 +47,16 @@ public class AmqpGatewayMiddleware
             VirtualHost = _options.VirtualHost,
             UserName = _options.UserName,
             Password = _options.Password,
-            DispatchConsumersAsync = true,
             AutomaticRecoveryEnabled = true,
             TopologyRecoveryEnabled = true
         };
 
-        _connection = factory.CreateConnection("AmqpGateway-Server");
-        _channel = _connection.CreateModel();
+        _connection = factory.CreateConnectionAsync("AmqpGateway-Server").GetAwaiter().GetResult();
+        _channel = _connection.CreateChannelAsync().GetAwaiter().GetResult();
 
         // Declare queues
-        _channel.QueueDeclare(_options.RequestQueue, durable: _options.Persistent, exclusive: false, autoDelete: false);
-        _channel.QueueDeclare(_options.ResponseQueue, durable: _options.Persistent, exclusive: false, autoDelete: false);
+        _channel.QueueDeclareAsync(_options.RequestQueue, durable: _options.Persistent, exclusive: false, autoDelete: false).GetAwaiter().GetResult();
+        _channel.QueueDeclareAsync(_options.ResponseQueue, durable: _options.Persistent, exclusive: false, autoDelete: false).GetAwaiter().GetResult();
 
         // Start consuming responses
         StartResponseConsumer();
@@ -66,7 +65,7 @@ public class AmqpGatewayMiddleware
     private void StartResponseConsumer()
     {
         var consumer = new AsyncEventingBasicConsumer(_channel);
-        consumer.Received += async (sender, ea) =>
+        consumer.ReceivedAsync += async (sender, ea) =>
         {
             try
             {
@@ -74,7 +73,7 @@ public class AmqpGatewayMiddleware
                 if (string.IsNullOrWhiteSpace(correlationIdStr) || !Guid.TryParse(correlationIdStr, out var correlationId))
                 {
                     _logger.LogWarning("Received response without valid CorrelationId");
-                    _channel.BasicAck(ea.DeliveryTag, false);
+                    await _channel.BasicAckAsync(ea.DeliveryTag, false).ConfigureAwait(false);
                     return;
                 }
 
@@ -82,7 +81,7 @@ public class AmqpGatewayMiddleware
                 if (envelope == null)
                 {
                     _logger.LogWarning("Failed to deserialize response for {CorrelationId}", correlationId);
-                    _channel.BasicAck(ea.DeliveryTag, false);
+                    await _channel.BasicAckAsync(ea.DeliveryTag, false).ConfigureAwait(false);
                     return;
                 }
 
@@ -96,19 +95,17 @@ public class AmqpGatewayMiddleware
                 var cacheKey = $"amqp:result:{correlationId:N}";
                 _cache.Set(cacheKey, envelope, TimeSpan.FromMinutes(_options.ResultTtlMinutes));
 
-                _channel.BasicAck(ea.DeliveryTag, false);
+                await _channel.BasicAckAsync(ea.DeliveryTag, false).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error processing response");
-                _channel.BasicAck(ea.DeliveryTag, false);
+                await _channel.BasicAckAsync(ea.DeliveryTag, false).ConfigureAwait(false);
             }
-
-            await Task.Yield();
         };
 
-        _channel.BasicQos(0, 50, false);
-        _channel.BasicConsume(_options.ResponseQueue, autoAck: false, consumer: consumer);
+        _channel.BasicQosAsync(0, 50, false).GetAwaiter().GetResult();
+        _channel.BasicConsumeAsync(_options.ResponseQueue, autoAck: false, consumer: consumer).GetAwaiter().GetResult();
     }
 
     /// <summary>
@@ -151,9 +148,11 @@ public class AmqpGatewayMiddleware
 
         // Serialize and publish
         var payload = JsonSerializer.SerializeToUtf8Bytes(envelope, _jsonOptions);
-        var props = _channel.CreateBasicProperties();
-        props.CorrelationId = correlationId.ToString();
-        props.Persistent = _options.Persistent;
+        var props = new BasicProperties
+        {
+            CorrelationId = correlationId.ToString(),
+            Persistent = _options.Persistent
+        };
 
         // Register pending request
         var tcs = new TaskCompletionSource<HttpResponseEnvelope>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -161,7 +160,7 @@ public class AmqpGatewayMiddleware
 
         try
         {
-            _channel.BasicPublish("", _options.RequestQueue, false, props, payload);
+            await _channel.BasicPublishAsync("", _options.RequestQueue, false, props, payload).ConfigureAwait(false);
             _logger.LogInformation("Published request {CorrelationId} to {Queue}", correlationId, _options.RequestQueue);
 
             // Wait for response with timeout

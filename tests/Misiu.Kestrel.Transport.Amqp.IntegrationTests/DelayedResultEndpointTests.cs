@@ -45,11 +45,11 @@ public class DelayedResultEndpointTests : IAsyncLifetime
                 UserName = _rabbitMq.UserName,
                 Password = _rabbitMq.Password
             };
-            using var connection = factory.CreateConnection();
-            using var channel = connection.CreateModel();
+            using var connection = await factory.CreateConnectionAsync().ConfigureAwait(false);
+            using var channel = await connection.CreateChannelAsync().ConfigureAwait(false);
 
-            try { channel.QueuePurge("amqp.gateway.requests"); } catch { }
-            try { channel.QueuePurge("amqp.gateway.responses"); } catch { }
+            try { await channel.QueuePurgeAsync("amqp.gateway.requests").ConfigureAwait(false); } catch { }
+            try { await channel.QueuePurgeAsync("amqp.gateway.responses").ConfigureAwait(false); } catch { }
         }
         catch
         {

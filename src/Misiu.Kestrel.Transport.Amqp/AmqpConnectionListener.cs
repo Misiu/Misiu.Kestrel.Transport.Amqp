@@ -22,7 +22,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
     private readonly ILogger<AmqpConnectionListener> _logger;
 
     private IConnection? _conn;
-    private IModel? _ch;
+    private IChannel? _ch;
     private AsyncEventingBasicConsumer? _consumer;
     private string? _consumerTag;
 
@@ -46,7 +46,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
     /// <summary>
     /// Starts the listener
     /// </summary>
-    public Task StartAsync(CancellationToken cancellationToken)
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
         var factory = new ConnectionFactory
         {
@@ -55,31 +55,29 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
             VirtualHost = _opts.VirtualHost,
             UserName = _opts.UserName,
             Password = _opts.Password,
-            DispatchConsumersAsync = true,
             AutomaticRecoveryEnabled = true,
             TopologyRecoveryEnabled = true
         };
 
         // Use unique connection name to ensure complete isolation between instances
         var connectionName = $"AmqpTransport-{_endpoint.Name}-{Guid.NewGuid().ToString().Substring(0, 8)}";
-        _conn = factory.CreateConnection(connectionName);
-        _ch = _conn.CreateModel();
+        _conn = await factory.CreateConnectionAsync(connectionName).ConfigureAwait(false);
+        _ch = await _conn.CreateChannelAsync().ConfigureAwait(false);
 
         _logger.LogInformation("Creating AMQP connection '{ConnectionName}'", connectionName);
 
-        _ch.QueueDeclare(_opts.RequestQueue, durable: _opts.Persistent, exclusive: false, autoDelete: false, arguments: null);
-        _ch.QueueDeclare(_opts.ResponseQueue, durable: _opts.Persistent, exclusive: false, autoDelete: false, arguments: null);
-        _ch.BasicQos(0, _opts.PrefetchCount, global: false);
+        await _ch.QueueDeclareAsync(_opts.RequestQueue, durable: _opts.Persistent, exclusive: false, autoDelete: false, arguments: null).ConfigureAwait(false);
+        await _ch.QueueDeclareAsync(_opts.ResponseQueue, durable: _opts.Persistent, exclusive: false, autoDelete: false, arguments: null).ConfigureAwait(false);
+        await _ch.BasicQosAsync(0, _opts.PrefetchCount, global: false).ConfigureAwait(false);
 
         _consumer = new AsyncEventingBasicConsumer(_ch);
-        _consumer.Received += OnReceivedAsync;
+        _consumer.ReceivedAsync += OnReceivedAsync;
 
         // Use unique consumer tag to avoid conflicts with previous consumers
         _consumerTag = $"AmqpTransport-{_endpoint.Name}-{Guid.NewGuid()}";
-        _ch.BasicConsume(_opts.RequestQueue, autoAck: false, consumer: _consumer, consumerTag: _consumerTag);
+        await _ch.BasicConsumeAsync(_opts.RequestQueue, autoAck: false, consumer: _consumer, consumerTag: _consumerTag).ConfigureAwait(false);
 
         _logger.LogInformation("AMQP listener started on queue '{Queue}'", _opts.RequestQueue);
-        return Task.CompletedTask;
     }
 
     /// <inheritdoc />
@@ -99,7 +97,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
     }
 
     /// <inheritdoc />
-    public ValueTask UnbindAsync(CancellationToken cancellationToken = default)
+    public async ValueTask UnbindAsync(CancellationToken cancellationToken = default)
     {
         // Complete the accept queue so any waiting AcceptAsync calls will complete
         _acceptQueue.Writer.TryComplete();
@@ -109,9 +107,9 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
         {
             if (_consumer != null && _ch != null && _consumerTag != null)
             {
-                _consumer.Received -= OnReceivedAsync;
+                _consumer.ReceivedAsync -= OnReceivedAsync;
                 // Explicitly cancel the consumer before closing the channel
-                _ch.BasicCancel(_consumerTag);
+                await _ch.BasicCancelAsync(_consumerTag).ConfigureAwait(false);
             }
         }
         catch
@@ -121,7 +119,10 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
 
         try
         {
-            _ch?.Close();
+            if (_ch != null)
+            {
+                await _ch.CloseAsync().ConfigureAwait(false);
+            }
         }
         catch
         {
@@ -129,13 +130,15 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
         }
         try
         {
-            _conn?.Close();
+            if (_conn != null)
+            {
+                await _conn.CloseAsync().ConfigureAwait(false);
+            }
         }
         catch
         {
             // Ignore close errors
         }
-        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc />
@@ -210,7 +213,7 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
             _logger.LogError(ex, "Failed to convert AMQP message to ConnectionContext");
             try
             {
-                _ch!.BasicAck(ea.DeliveryTag, multiple: false);
+                await _ch!.BasicAckAsync(ea.DeliveryTag, multiple: false).ConfigureAwait(false);
             }
             catch
             {
@@ -274,12 +277,12 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
             Buffer.BlockCopy(body, 0, buf, headBytes.Length, body.Length);
         }
 
-        Task PublishAsync(ReadOnlyMemory<byte> responseRaw)
+        async Task PublishAsync(ReadOnlyMemory<byte> responseRaw)
         {
             if (_ch == null)
             {
                 _logger.LogWarning("Channel is null, cannot publish response for {CorrelationId}", correlationId);
-                return Task.CompletedTask;
+                return;
             }
 
             try
@@ -292,23 +295,23 @@ public sealed class AmqpConnectionListener : IConnectionListener, IDisposable
                 var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
                 var jsonBytes = JsonSerializer.SerializeToUtf8Bytes(responseEnvelope, jsonOptions);
 
-                var props = _ch.CreateBasicProperties();
-                props.Persistent = _opts.Persistent;
-                props.CorrelationId = correlationId;
+                var props = new BasicProperties
+                {
+                    Persistent = _opts.Persistent,
+                    CorrelationId = correlationId
+                };
 
-                _ch.BasicPublish(
+                await _ch.BasicPublishAsync(
                     exchange: "",
                     routingKey: responseQueue,
                     mandatory: false,
                     basicProperties: props,
-                    body: jsonBytes);
+                    body: jsonBytes).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error publishing response for {CorrelationId}", correlationId);
             }
-
-            return Task.CompletedTask;
         }
 
         HttpResponseEnvelope ParseRawHttpResponse(ReadOnlyMemory<byte> responseRaw)
